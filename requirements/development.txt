@@ -1,0 +1,25 @@
+-r base.txt
+
+# Debugging
+django-debug-toolbar==4.2.0
+ipython==8.20.0
+ipdb==0.13.13
+
+# Testing
+pytest==7.4.4
+pytest-django==4.7.0
+pytest-cov==4.1.0
+factory-boy==3.3.0
+faker==22.0.0
+
+# Code quality
+black==23.12.1
+flake8==7.0.0
+isort==5.13.2
+pylint==3.0.3
+mypy==1.8.0
+pre-commit==3.6.0
+
+# Documentation
+sphinx==7.2.6
+sphinx-rtd-theme==2.0.0

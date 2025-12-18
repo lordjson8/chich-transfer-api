@@ -1,0 +1,13 @@
+-r base.txt
+
+# Production server
+gunicorn==21.2.0
+uvicorn==0.27.0  # ASGI server
+gevent==24.2.1
+
+# Monitoring
+newrelic==9.5.0
+django-prometheus==2.3.1
+
+# Performance
+django-cachalot==2.6.1

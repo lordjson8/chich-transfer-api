@@ -2,4 +2,4 @@ from django.apps import AppConfig
 
 
 class TransfersConfig(AppConfig):
-    name = 'transfers'
+    name = 'apps.transfers'

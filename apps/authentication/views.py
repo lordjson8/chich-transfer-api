@@ -83,7 +83,7 @@ class RegisterView(generics.CreateAPIView):
         serializer.is_valid(raise_exception=True)
         
         # Create user
-        user = serializer.validated_data
+        user = serializer.create(serializer.validated_data)
         
         # Get IP address
         ip_address = get_client_ip(request)
@@ -111,6 +111,7 @@ class RegisterView(generics.CreateAPIView):
             
             send_otp_email(user.email, email_otp_code, 'email_verification')
             send_otp_sms(str(user.phone), phone_otp_code)
+            print('sent_otp')
         except Exception as e:
             # Log error but don't fail registration
             print(f"Error sending OTP: {e}")
@@ -130,24 +131,41 @@ class RegisterView(generics.CreateAPIView):
 
 
 class LoginView(APIView):
-    """
-    User login with email and password
-    
-    POST /api/auth/login
-    {
-        "email": "user@example.com",
-        "password": "SecurePass123",
-        "device_id": "abc-123-device-id",
-        "device_name": "iPhone 15 Pro",
-        "device_type": "ios"
-    }
-    """
+    """User login with email and password"""
     permission_classes = [AllowAny]
     
     def post(self, request):
         serializer = LoginSerializer(data=request.data, context={'request': request})
-        serializer.is_valid(raise_exception=True)
         
+        # Validate
+        if not serializer.is_valid():
+            return Response({
+                'success': False,
+                'error': serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Check if user is inactive
+        inactive_user = serializer.validated_data.get('inactive_user')
+        
+        if inactive_user:
+            # User exists and password is correct, but account not active
+            return Response({
+                'success': False,
+                'error': 'Account not verified',
+                'error_code': 'ACCOUNT_NOT_VERIFIED',
+                'message': 'Please verify your email and phone number to activate your account.',
+                'data': {
+                    'user_id': inactive_user.id,
+                    'email': inactive_user.email,
+                    'phone': str(inactive_user.phone),
+                    'email_verified': inactive_user.email_verified,
+                    'phone_verified': inactive_user.phone_verified,
+                    'email_masked': f"{inactive_user.email[:2]}***@{inactive_user.email.split('@')[1]}",
+                    'phone_masked': f"{str(inactive_user.phone)[:8]}***{str(inactive_user.phone)[-4:]}",
+                }
+            }, status=status.HTTP_403_FORBIDDEN)
+        
+        # Get active user
         user = serializer.validated_data['user']
         device_id = serializer.validated_data['device_id']
         device_name = serializer.validated_data.get('device_name')
@@ -155,7 +173,6 @@ class LoginView(APIView):
         
         # Check if 2FA is enabled
         if user.two_factor_enabled:
-            # Create OTP for 2FA
             ip_address = get_client_ip(request)
             otp_verification, otp_code = create_otp_verification(
                 user=user,
@@ -287,8 +304,8 @@ class VerifyEmailView(APIView):
         user.email_verified = True
         
         # If both email and phone verified, activate account
-        if user.phone_verified:
-            user.is_active = True
+        # if user.phone_verified:
+        user.is_active = True
         
         user.save(update_fields=['email_verified', 'is_active'])
         
@@ -305,7 +322,7 @@ class VerifyEmailView(APIView):
                 'phone_verified': user.phone_verified,
                 'account_active': user.is_active,
                 'tokens': tokens,
-                'user': UserSerializer(user).data if user.is_active else None
+                    'user': UserSerializer(user).data if user.is_active else None
             }
         })
 

@@ -91,32 +91,38 @@ class LoginSerializer(serializers.Serializer):
         email = attrs.get('email')
         password = attrs.get('password')
         
-        if email and password:
-            user = authenticate(
-                request=self.context.get('request'),
-                username=email,
-                password=password
+        if not email or not password:
+            raise serializers.ValidationError(
+                'Must include "email" and "password".',
+                code='required'
             )
-            
-            if not user:
-                raise serializers.ValidationError(
-                    'Invalid email or password.',
-                    code='authentication'
-                )
-            
-            if not user.is_active:
-                raise serializers.ValidationError(
-                    'Account is disabled. Please verify your email and phone.',
-                    code='inactive'
-                )
-            
-            attrs['user'] = user
+        
+        # Step 1: Check if user exists
+        try:
+            user = User.objects.get(email=email)
+        except User.DoesNotExist:
+            raise serializers.ValidationError(
+                'Invalid email or password.',
+                code='invalid_credentials'
+            )
+        
+        # Step 2: Check password
+        if not user.check_password(password):
+            raise serializers.ValidationError(
+                'Invalid email or password.',
+                code='invalid_credentials'
+            )
+        
+        # Step 3: Check if account is active
+        if not user.is_active:
+            # Return user data for verification flow
+            attrs['user'] = None  # Set to None to indicate inactive
+            attrs['inactive_user'] = user  # Pass the inactive user
             return attrs
         
-        raise serializers.ValidationError(
-            'Must include "email" and "password".',
-            code='required'
-        )
+        # Step 4: All checks passed
+        attrs['user'] = user
+        return attrs
 
 
 # ============================================================================

@@ -17,7 +17,10 @@ MIDDLEWARE += [
 INTERNAL_IPS = ['127.0.0.1']
 
 # Email backend for development
-EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+EMAIL_BACKEND='django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST_USER="wouriwise@gmail.com"
+EMAIL_HOST_PASSWORD="iduxsyirrnolrvti"
+# EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
 
 # Less strict CORS for development
 CORS_ALLOW_ALL_ORIGINS = True

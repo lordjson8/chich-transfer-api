@@ -60,3 +60,4 @@ django-extensions==3.2.3
 
 # API documentation
 drf-yasg==1.21.7  # Swagger/OpenAPI
+setuptools # for python > 3.12

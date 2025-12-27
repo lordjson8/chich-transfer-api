@@ -305,13 +305,13 @@ class VerifyEmailView(APIView):
         
         # If both email and phone verified, activate account
         # if user.phone_verified:
-        user.is_active = True
+        # user.is_active = True
         
         user.save(update_fields=['email_verified', 'is_active'])
         
         # Generate tokens if account is active
         tokens = None
-        if user.is_active:
+        if user.email_verified:
             tokens = get_tokens_for_user(user)
         
         return Response({

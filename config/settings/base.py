@@ -75,24 +75,43 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'config.wsgi.application'
 
-# Database
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.mysql',
-        'NAME': config('DB_NAME', default='money_transfer_db'),
-        'USER': config('DB_USER', default='root'),
-        'PASSWORD': config('DB_PASSWORD', default='password'),
-        'HOST': config('DB_HOST', default='localhost'),
-        'PORT': config('DB_PORT', default='3306'),
-        'OPTIONS': {
-            'charset': 'utf8mb4',
-            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
-            'isolation_level': 'read committed',
-        },
-        'CONN_MAX_AGE': 600,  # Connection pooling
-    }
-}
 
+DB_ENGINE = config("DB_ENGINE", "django.db.backends.sqlite3")
+# print(f"Engine {DB_ENGINE}")
+
+if DB_ENGINE == "django.db.backends.mysql":
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.mysql",
+            "HOST": config("DB_HOST", "127.0.0.1"),
+            "PORT": config("DB_PORT", "3306"),
+            "NAME": config("DB_NAME", "chic_transfer_dev"),
+            "USER": config("DB_USER", "chic_user"),
+            "PASSWORD": config("DB_PASSWORD", "chic_password"),
+            "OPTIONS": {
+                "charset": "utf8mb4",
+            },
+        }
+    }
+elif DB_ENGINE == "django.db.backends.postgresql":
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "HOST": config("DB_HOST", "127.0.0.1"),
+            "PORT": config("DB_PORT", "5432"),
+            "NAME": config("DB_NAME", "chic_transfer"),
+            "USER": config("DB_USER", "chic_user"),
+            "PASSWORD": config("DB_PASSWORD", "chic_password"),
+        }
+    }
+else:
+    # fallback (e.g., tests)
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
+    }
 # Custom User Model (we'll create this)
 AUTH_USER_MODEL = 'authentication.User'
 

@@ -65,7 +65,7 @@ class UserRegistrationSerializer(serializers.ModelSerializer):
             password=validated_data['password'],
             full_name=validated_data.get('full_name', ''),
             country=validated_data['country'],
-            is_active=False,  # Inactive until verified
+            # is_active=False,  # Inactive until verified
         )
         
         return user
@@ -114,7 +114,7 @@ class LoginSerializer(serializers.Serializer):
             )
         
         # Step 3: Check if account is active
-        if not user.is_active:
+        if not user.email_verified:
             # Return user data for verification flow
             attrs['user'] = None  # Set to None to indicate inactive
             attrs['inactive_user'] = user  # Pass the inactive user

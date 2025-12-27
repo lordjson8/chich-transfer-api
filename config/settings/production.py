@@ -6,6 +6,8 @@ DEBUG = False
 
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', cast=Csv())
 
+# DB_ENGINE = "django.db.backends.postgresql"
+
 # Security settings for production
 SECURE_SSL_REDIRECT = True
 SESSION_COOKIE_SECURE = True

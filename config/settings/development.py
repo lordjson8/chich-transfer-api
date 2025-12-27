@@ -2,7 +2,9 @@ from .base import *
 
 DEBUG = True
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0']
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0','192.168.1.104']
+
+# DB_ENGINE = "django.db.backends.mysql"
 
 # Development-specific apps
 INSTALLED_APPS += [
@@ -14,7 +16,7 @@ MIDDLEWARE += [
 ]
 
 # Debug toolbar
-INTERNAL_IPS = ['127.0.0.1']
+INTERNAL_IPS = ['127.0.0.1','192.168.100.223']
 
 # Email backend for development
 EMAIL_BACKEND='django.core.mail.backends.smtp.EmailBackend'

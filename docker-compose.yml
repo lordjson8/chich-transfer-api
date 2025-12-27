@@ -1,0 +1,55 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        REQUIREMENTS_FILE: requirements/development.txt   # install dev deps
+    container_name: chic_transfer_api_dev
+    command: ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+    # command: ["/app/docker/entrypoint.sh"]
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    depends_on:
+      - mysql
+
+  mysql:
+    image: mysql:8.0
+    container_name: chic_transfer_mysql
+    restart: always
+    environment:
+      MYSQL_DATABASE: chic_transfer_dev
+      MYSQL_USER: chic_user
+      MYSQL_PASSWORD: chic_password
+      MYSQL_ROOT_PASSWORD: root_password
+    ports:
+      - "3306:3307"
+    volumes:
+      - mysql_data:/var/lib/mysql
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin
+    container_name: chic_transfer_phpmyadmin
+    restart: always
+    environment:
+      PMA_HOST: mysql
+      PMA_USER: chic_user
+      PMA_PASSWORD: chic_password
+    ports:
+      - "8080:80"
+    depends_on:
+      - mysql
+  redis:
+    image: redis:7-alpine
+    container_name: chic_transfer_redis
+    restart: always
+    ports:
+      - "6379:6379"
+
+
+volumes:
+  mysql_data:

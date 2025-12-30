@@ -19,3 +19,27 @@ class CustomPageNumberPagination(PageNumberPagination):
             'previous': self.get_previous_link(),
             'results': data
         })
+
+
+from rest_framework.pagination import LimitOffsetPagination
+
+
+class StandardResultsSetPagination(LimitOffsetPagination):
+    """
+    Standard pagination with limit/offset.
+    """
+    default_limit = 20
+    max_limit = 100
+    
+    def get_paginated_response(self, data):
+        return Response({
+            'success': True,
+            'data': data,
+            'pagination': {
+                'count': self.count,
+                'limit': self.limit,
+                'offset': self.offset,
+                'has_next': self.get_next_link() is not None,
+                'has_previous': self.get_previous_link() is not None,
+            }
+        })

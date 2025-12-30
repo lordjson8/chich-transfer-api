@@ -5,7 +5,7 @@ from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from phonenumber_field.serializerfields import PhoneNumberField
-from .models import User, UserDevice, OTPVerification
+from .models import User, UserDevice, OTPVerification,PasswordHistory, PasswordResetToken
 from .utils import verify_otp, validate_public_key
 
 
@@ -236,3 +236,195 @@ class BiometricLoginVerifySerializer(serializers.Serializer):
     challenge_id = serializers.UUIDField(required=True)
     signature = serializers.CharField(required=True)
     device_id = serializers.CharField(required=True)
+
+
+# Password Reset Serializers
+
+# apps/authentication/serializers.py
+
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
+
+
+class RequestPasswordResetSerializer(serializers.Serializer):
+    """Request password reset"""
+    
+    email = serializers.EmailField(required=True)
+    
+    def validate_email(self, value):
+        """Verify email exists"""
+        try:
+            User.objects.get(email=value)
+        except User.DoesNotExist:
+            # Don't reveal if email exists for security
+            raise serializers.ValidationError(
+                "If an account exists with this email, you will receive a password reset link."
+            )
+        return value
+
+
+class VerifyPasswordResetTokenSerializer(serializers.Serializer):
+    """Verify reset token is valid"""
+    
+    token = serializers.CharField(required=True, min_length=20)
+    
+    def validate_token(self, value):
+        """Verify token exists and is valid"""
+        try:
+            reset_token = PasswordResetToken.objects.get(token=value)
+        except PasswordResetToken.DoesNotExist:
+            raise serializers.ValidationError("Invalid or expired reset token.")
+        
+        if not reset_token.is_valid():
+            raise serializers.ValidationError("Reset token has expired. Please request a new one.")
+        
+        return value
+
+
+class ResetPasswordSerializer(serializers.Serializer):
+    """Reset password with token"""
+    
+    token = serializers.CharField(required=True, min_length=20)
+    password = serializers.CharField(
+        required=True,
+        write_only=True,
+        style={'input_type': 'password'}
+    )
+    password_confirm = serializers.CharField(
+        required=True,
+        write_only=True,
+        style={'input_type': 'password'}
+    )
+    
+    def validate_password(self, value):
+        """Validate password strength"""
+        try:
+            validate_password(value)
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(e.messages)
+        return value
+    
+    def validate(self, attrs):
+        """Verify passwords match and token is valid"""
+        token = attrs.get('token')
+        password = attrs.get('password')
+        password_confirm = attrs.get('password_confirm')
+        
+        # Verify token
+        try:
+            reset_token = PasswordResetToken.objects.get(token=token)
+        except PasswordResetToken.DoesNotExist:
+            raise serializers.ValidationError(
+                {"token": "Invalid or expired reset token."}
+            )
+        
+        if not reset_token.is_valid():
+            raise serializers.ValidationError(
+                {"token": "Reset token has expired. Please request a new one."}
+            )
+        
+        # Verify passwords match
+        if password != password_confirm:
+            raise serializers.ValidationError(
+                {"password_confirm": "Passwords do not match."}
+            )
+        
+        attrs['user'] = reset_token.user
+        attrs['reset_token'] = reset_token
+        return attrs
+    
+    def save(self):
+        """Reset password"""
+        user = self.validated_data['user']
+        password = self.validated_data['password']
+        reset_token = self.validated_data['reset_token']
+        ip_address = self.context.get('ip_address')
+        
+        # Update password
+        user.set_password(password)
+        user.save(update_fields=['password', 'updated_at'])
+        
+        # Record in password history
+        PasswordHistory.record_password_change(
+            user=user,
+            ip_address=ip_address,
+            reason='reset'
+        )
+        
+        # Mark token as used
+        reset_token.mark_as_used()
+        
+        return user
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    """Change password (authenticated user)"""
+    
+    current_password = serializers.CharField(
+        required=True,
+        write_only=True,
+        style={'input_type': 'password'}
+    )
+    new_password = serializers.CharField(
+        required=True,
+        write_only=True,
+        style={'input_type': 'password'}
+    )
+    new_password_confirm = serializers.CharField(
+        required=True,
+        write_only=True,
+        style={'input_type': 'password'}
+    )
+    
+    def validate_current_password(self, value):
+        """Verify current password is correct"""
+        user = self.context['request'].user
+        
+        if not user.check_password(value):
+            raise serializers.ValidationError(
+                "Current password is incorrect."
+            )
+        
+        return value
+    
+    def validate_new_password(self, value):
+        """Validate password strength"""
+        try:
+            validate_password(value)
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(e.messages)
+        return value
+    
+    def validate(self, attrs):
+        """Verify new passwords match and are different"""
+        if attrs['new_password'] != attrs['new_password_confirm']:
+            raise serializers.ValidationError(
+                {"new_password_confirm": "Passwords do not match."}
+            )
+        
+        # Verify new password is different from current
+        user = self.context['request'].user
+        if user.check_password(attrs['new_password']):
+            raise serializers.ValidationError(
+                {"new_password": "New password must be different from current password."}
+            )
+        
+        return attrs
+    
+    def save(self):
+        """Change password"""
+        user = self.context['request'].user
+        new_password = self.validated_data['new_password']
+        ip_address = self.context.get('ip_address')
+        
+        user.set_password(new_password)
+        user.save(update_fields=['password', 'updated_at'])
+        
+        # Record in password history
+        PasswordHistory.record_password_change(
+            user=user,
+            ip_address=ip_address,
+            reason='change'
+        )
+        
+        return user

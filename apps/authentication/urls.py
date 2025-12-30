@@ -29,4 +29,10 @@ urlpatterns = [
     
     # JWT Token
     path('token/refresh/', TokenRefreshView.as_view(), name='token-refresh'),
+
+     # Password Management
+    path('password/request-reset/', views.RequestPasswordResetView.as_view(), name='request-password-reset'),
+    path('password/verify-token/', views.VerifyPasswordResetTokenView.as_view(), name='verify-reset-token'),
+    path('password/reset/', views.ResetPasswordView.as_view(), name='reset-password'),
+    path('password/change/', views.ChangePasswordView.as_view(), name='change-password'),
 ]

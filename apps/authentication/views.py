@@ -10,13 +10,20 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from django.utils import timezone
 from django.conf import settings
 from datetime import timedelta
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExample
+from drf_spectacular.types import OpenApiTypes
 
-from .models import User, UserDevice, OTPVerification, BiometricChallenge
+
+from .models import User, UserDevice, OTPVerification, BiometricChallenge,PasswordResetToken
 from .serializers import (
     UserSerializer, UserRegistrationSerializer, LoginSerializer,
     OTPVerificationSerializer, ResendOTPSerializer,
     BiometricSetupSerializer, BiometricLoginRequestSerializer,
-    BiometricLoginVerifySerializer
+    BiometricLoginVerifySerializer,
+    VerifyPasswordResetTokenSerializer,
+    RequestPasswordResetSerializer, 
+    ResetPasswordSerializer,
+    ChangePasswordSerializer
 )
 from .utils import (
     create_otp_verification, send_otp_email, send_otp_sms,
@@ -48,6 +55,7 @@ def create_or_update_device(user, device_id, device_name=None, device_type=None,
             'device_type': device_type or 'android',
         }
     )
+    print(device,created)
     
     # Update last login info
     device.last_login_at = timezone.now()
@@ -62,10 +70,11 @@ def create_or_update_device(user, device_id, device_name=None, device_type=None,
 # ============================================================================
 
 class RegisterView(generics.CreateAPIView):
+
+    
     """
     User registration endpoint
     
-    POST /api/auth/register
     {
         "email": "user@example.com",
         "phone": "+2250748672248",
@@ -77,6 +86,13 @@ class RegisterView(generics.CreateAPIView):
     """
     permission_classes = [AllowAny]
     serializer_class = UserRegistrationSerializer
+
+    @extend_schema(
+    request=UserRegistrationSerializer,
+    methods=['POST']
+    # responses={201:},
+    )
+
     
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -88,7 +104,6 @@ class RegisterView(generics.CreateAPIView):
         # Get IP address
         ip_address = get_client_ip(request)
 
-        print(ip_address,user)
         
         # Create OTP for email verification
         email_otp_verification, email_otp_code = create_otp_verification(
@@ -97,7 +112,7 @@ class RegisterView(generics.CreateAPIView):
             sent_to=user.email,
             ip_address=ip_address
         )
-        
+        print(f"email_otp_code: {email_otp_code}")
         # Create OTP for phone verification
         phone_otp_verification, phone_otp_code = create_otp_verification(
             user=user,
@@ -163,7 +178,7 @@ class LoginView(APIView):
                     'email_masked': f"{inactive_user.email[:2]}***@{inactive_user.email.split('@')[1]}",
                     'phone_masked': f"{str(inactive_user.phone)[:8]}***{str(inactive_user.phone)[-4:]}",
                 }
-            }, status=status.HTTP_403_FORBIDDEN)
+            }, status=status.HTTP_202_ACCEPTED)
         
         # Get active user
         user = serializer.validated_data['user']
@@ -290,6 +305,8 @@ class VerifyEmailView(APIView):
         # Force otp_type to email_verification
         data = request.data.copy()
         data['otp_type'] = 'email_verification'
+
+        print(data)
         
         serializer = OTPVerificationSerializer(data=data)
         serializer.is_valid(raise_exception=True)
@@ -307,7 +324,7 @@ class VerifyEmailView(APIView):
         # if user.phone_verified:
         # user.is_active = True
         
-        user.save(update_fields=['email_verified', 'is_active'])
+        user.save(update_fields=['email_verified'])
         
         # Generate tokens if account is active
         tokens = None
@@ -453,6 +470,8 @@ class ResendOTPView(APIView):
             otp_verification, otp_code = create_otp_verification(
                 user, otp_type, sent_to, ip_address
             )
+            print(f"email_otp_code: {otp_code}")
+
             send_otp_email(user.email, otp_code, otp_type)
             masked = f"{user.email[:2]}***@{user.email.split('@')[1]}"
         else:  # phone_verification
@@ -666,3 +685,193 @@ class BiometricVerifyView(APIView):
                 'tokens': tokens
             }
         })
+
+
+# Password Reset and change
+
+from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
+from django.conf import settings
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def get_client_ip(request):
+    """Extract client IP from request"""
+    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+    if x_forwarded_for:
+        ip = x_forwarded_for.split(',')[0]
+    else:
+        ip = request.META.get('REMOTE_ADDR')
+    return ip
+
+
+class PasswordResetThrottle(AnonRateThrottle):
+    """5 password reset requests per hour"""
+    scope = 'password_reset'
+
+
+class PasswordChangeThrottle(UserRateThrottle):
+    """10 password changes per day"""
+    scope = 'password_change'
+
+
+class RequestPasswordResetView(APIView):
+    """Request password reset link via email"""
+    permission_classes = [AllowAny]
+    throttle_classes = [PasswordResetThrottle]
+    
+    def post(self, request):
+        """
+        Request password reset
+        
+        POST /api/auth/password/request-reset/
+        {
+            "email": "user@example.com"
+        }
+        """
+        serializer = RequestPasswordResetSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        email = serializer.validated_data['email']
+        
+        try:
+            user = User.objects.get(email=email)
+            ip_address = get_client_ip(request)
+            
+            # Create reset token
+            reset_token = PasswordResetToken.create_token(
+                user=user,
+                ip_address=ip_address,
+                valid_for_hours=1
+            )
+            
+            # Send email with reset link
+            reset_link = f"{settings.FRONTEND_URL}/reset-password?token={reset_token.token}"
+            
+            # TODO: Send email
+            # send_password_reset_email(
+            #     email=user.email,
+            #     reset_link=reset_link,
+            #     user_name=user.full_name
+            # )
+            
+            logger.info(f"Password reset requested for user: {user.id} from IP: {ip_address}")
+            
+        except User.DoesNotExist:
+            # Always return success for security (don't reveal if email exists)
+            pass
+        
+        # Return generic success message
+        return Response({
+            'success': True,
+            'message': 'If an account exists with this email, you will receive a password reset link.',
+            'data': {}
+        }, status=status.HTTP_200_OK)
+
+
+class VerifyPasswordResetTokenView(APIView):
+    """Verify if reset token is valid"""
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        """
+        Verify reset token
+        
+        POST /api/auth/password/verify-token/
+        {
+            "token": "..."
+        }
+        """
+        serializer = VerifyPasswordResetTokenSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        token = serializer.validated_data['token']
+        reset_token = PasswordResetToken.objects.get(token=token)
+        
+        return Response({
+            'success': True,
+            'message': 'Reset token is valid.',
+            'data': {
+                'token': token,
+                'email': reset_token.user.email,
+                'expires_at': reset_token.expires_at.isoformat()
+            }
+        }, status=status.HTTP_200_OK)
+
+
+class ResetPasswordView(APIView):
+    """Reset password using token"""
+    permission_classes = [AllowAny]
+    throttle_classes = [PasswordResetThrottle]
+    
+    def post(self, request):
+        """
+        Reset password with token
+        
+        POST /api/auth/password/reset/
+        {
+            "token": "...",
+            "password": "NewPassword123!",
+            "password_confirm": "NewPassword123!"
+        }
+        """
+        ip_address = get_client_ip(request)
+        
+        serializer = ResetPasswordSerializer(
+            data=request.data,
+            context={'ip_address': ip_address}
+        )
+        serializer.is_valid(raise_exception=True)
+        
+        user = serializer.save()
+        
+        logger.info(f"Password reset successfully for user: {user.id} from IP: {ip_address}")
+        
+        return Response({
+            'success': True,
+            'message': 'Password has been reset successfully. Please login with your new password.',
+            'data': {
+                'user_id': user.id,
+                'email': user.email
+            }
+        }, status=status.HTTP_200_OK)
+
+
+class ChangePasswordView(APIView):
+    """Change password (authenticated user)"""
+    permission_classes = [IsAuthenticated]
+    throttle_classes = [PasswordChangeThrottle]
+    
+    def post(self, request):
+        """
+        Change password (authenticated)
+        
+        POST /api/auth/password/change/
+        Headers: Authorization: Bearer <token>
+        {
+            "current_password": "CurrentPassword123!",
+            "new_password": "NewPassword123!",
+            "new_password_confirm": "NewPassword123!"
+        }
+        """
+        ip_address = get_client_ip(request)
+        
+        serializer = ChangePasswordSerializer(
+            data=request.data,
+            context={'request': request, 'ip_address': ip_address}
+        )
+        serializer.is_valid(raise_exception=True)
+        
+        user = serializer.save()
+        
+        logger.info(f"Password changed for user: {user.id} from IP: {ip_address}")
+        
+        return Response({
+            'success': True,
+            'message': 'Password changed successfully.',
+            'data': {
+                'user_id': user.id,
+                'email': user.email
+            }
+        }, status=status.HTTP_200_OK)

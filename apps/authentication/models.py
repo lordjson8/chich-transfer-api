@@ -12,6 +12,8 @@ from django.utils import timezone
 from django.core.validators import RegexValidator
 from phonenumber_field.modelfields import PhoneNumberField
 from datetime import timedelta
+import secrets
+
 
 
 # ============================================================================
@@ -400,40 +402,137 @@ class BiometricChallenge(models.Model):
 # ============================================================================
 # PASSWORD RESET TOKEN MODEL
 # ============================================================================
+# class PasswordResetToken(models.Model):
+#     """Store password reset tokens"""
+    
+#     user = models.ForeignKey(
+#         User,
+#         on_delete=models.CASCADE,
+#         related_name='password_reset_tokens'
+#     )
+#     token = models.UUIDField(
+#         default=uuid.uuid4,
+#         unique=True,
+#         db_index=True
+#     )
+    
+#     created_at = models.DateTimeField(auto_now_add=True)
+#     expires_at = models.DateTimeField()
+#     is_used = models.BooleanField(default=False)
+#     used_at = models.DateTimeField(null=True, blank=True)
+    
+#     ip_address = models.GenericIPAddressField(null=True, blank=True)
+    
+#     class Meta:
+#         db_table = 'password_reset_tokens'
+#         verbose_name = 'Password Reset Token'
+#         verbose_name_plural = 'Password Reset Tokens'
+#         ordering = ['-created_at']
+    
+#     def __str__(self):
+#         return f"{self.user.email} - {self.token}"
+    
+#     @property
+#     def is_expired(self):
+#         return timezone.now() > self.expires_at
+    
+#     @property
+#     def is_valid(self):
+#         return not self.is_used and not self.is_expired
+
+
+# Password Reset
+
+
+
 class PasswordResetToken(models.Model):
-    """Store password reset tokens"""
+    """Token for password reset - expires after 1 hour"""
     
-    user = models.ForeignKey(
-        User,
-        on_delete=models.CASCADE,
-        related_name='password_reset_tokens'
-    )
-    token = models.UUIDField(
-        default=uuid.uuid4,
-        unique=True,
-        db_index=True
-    )
-    
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='password_reset_tokens')
+    token = models.CharField(max_length=255, unique=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     expires_at = models.DateTimeField()
     is_used = models.BooleanField(default=False)
+
     used_at = models.DateTimeField(null=True, blank=True)
-    
     ip_address = models.GenericIPAddressField(null=True, blank=True)
     
     class Meta:
-        db_table = 'password_reset_tokens'
-        verbose_name = 'Password Reset Token'
-        verbose_name_plural = 'Password Reset Tokens'
+        verbose_name = "Password Reset Token"
+        verbose_name_plural = "Password Reset Tokens"
         ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['token', 'expires_at']),
+            models.Index(fields=['user', 'used_at']),
+        ]
+    
+    def is_valid(self):
+        """Check if token is still valid"""
+        return (
+            self.used_at is None and
+            timezone.now() < self.expires_at
+        )
+    
+    def mark_as_used(self):
+        """Mark token as used"""
+        self.used_at = timezone.now()
+        self.is_used = True
+        self.save(update_fields=['used_at','is_used'])
+    
+    @classmethod
+    def create_token(cls, user, ip_address=None, valid_for_hours=1):
+        """Create a new reset token"""
+        # Delete old valid tokens to prevent multiple active tokens
+        cls.objects.filter(
+            user=user,
+            used_at__isnull=True,
+            expires_at__gt=timezone.now()
+        ).delete()
+        
+        token = secrets.token_urlsafe(32)
+        expires_at = timezone.now() + timedelta(hours=valid_for_hours)
+        
+        return cls.objects.create(
+            user=user,
+            token=token,
+            expires_at=expires_at,
+            ip_address=ip_address
+        )
     
     def __str__(self):
-        return f"{self.user.email} - {self.token}"
+        return f"Reset token for {self.user.email}"
+
+
+class PasswordHistory(models.Model):
+    """Track password changes for security audit"""
     
-    @property
-    def is_expired(self):
-        return timezone.now() > self.expires_at
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='password_history')
+    password_hash = models.CharField(max_length=255)
+    changed_at = models.DateTimeField(auto_now_add=True)
+    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    reason = models.CharField(
+        max_length=50,
+        choices=[
+            ('reset', 'Password Reset'),
+            ('change', 'Password Change'),
+            ('forced', 'Forced Change'),
+        ]
+    )
     
-    @property
-    def is_valid(self):
-        return not self.is_used and not self.is_expired
+    class Meta:
+        verbose_name = "Password History"
+        verbose_name_plural = "Password Histories"
+        ordering = ['-changed_at']
+    
+    @classmethod
+    def record_password_change(cls, user, ip_address=None, reason='change'):
+        """Record password change in history"""
+        return cls.objects.create(
+            user=user,
+            password_hash=user.password,
+            ip_address=ip_address,
+            reason=reason
+        )
+    
+    def __str__(self):
+        return f"{self.user.email} - {self.reason} ({self.changed_at})"

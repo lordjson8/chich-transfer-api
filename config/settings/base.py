@@ -27,13 +27,15 @@ THIRD_PARTY_APPS = [
     'rest_framework_simplejwt',
     'corsheaders',
     'django_extensions',
-    'drf_yasg',
+    # 'drf_yasg',
+    'drf_spectacular',
     'phonenumber_field',
 ]
 
 LOCAL_APPS = [
     'apps.core',
     'apps.authentication',
+    'apps.integrations',
     'apps.kyc',
     'apps.transfers',
     'apps.routes',
@@ -52,6 +54,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'apps.core.middleware.RequestLoggingMiddleware',  # Custom logging
+    'apps.core.middleware.TimezoneMiddleware',
 ]
 
 ROOT_URLCONF = 'config.urls'
@@ -190,15 +193,19 @@ REST_FRAMEWORK = {
         'rest_framework.throttling.AnonRateThrottle',
         'rest_framework.throttling.UserRateThrottle',
     ],
-    'DEFAULT_THROTTLE_RATES': {
+   'DEFAULT_THROTTLE_RATES': {
         'anon': '100/hour',
         'user': '1000/hour',
         'login': '5/minute',
         'otp': '3/minute',
+        # 'password_reset': '5/hour',      # Request reset 5 times/hour
+        'password_change': '10/day',     # Change password 10 times/day
     },
     'EXCEPTION_HANDLER': 'apps.core.exceptions.custom_exception_handler',
     'DATETIME_FORMAT': '%Y-%m-%dT%H:%M:%SZ',
     'DATE_FORMAT': '%Y-%m-%d',
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    "NON_FIELD_ERRORS_KEY": "errors",
 }
 
 # ============================================================================
@@ -408,3 +415,20 @@ LOGGING = {
         },
     },
 }
+
+
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Money Transfer API',
+    'DESCRIPTION': 'Cross-border money transfer API',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'CONTACT': {
+        "name": "Developer Support",
+        "email": "lordjson8@gmail.com"
+    },
+    # 'SWAGGER_UI_DIST': 'SIDECAR',  # shorthand to use the sidecar instead
+    # 'SWAGGER_UI_FAVICON_HREF': 'SIDECAR',
+    # 'REDOC_DIST': 'SIDECAR',
+}
+
+PASSWORD_RESET_TOKEN_EXPIRY_HOURS = config('PASSWORD_RESET_TOKEN_EXPIRY_HOURS', default=1, cast=int)

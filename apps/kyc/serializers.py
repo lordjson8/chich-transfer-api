@@ -2,7 +2,7 @@
 
 from rest_framework import serializers
 from django.utils import timezone
-from .models import KYCProfile, KYCDocument, KYCLevel
+from .models import KYCProfile, KYCDocument,DocumentSide, KYCLevel,KYCDocumentType,KYCVerificationLog,KYCVerificationStatus
 import hashlib
 
 
@@ -13,11 +13,16 @@ class KYCDocumentSerializer(serializers.ModelSerializer):
         source='get_document_type_display',
         read_only=True
     )
+    document_side_display = serializers.CharField(
+        source='get_document_side_display',
+        read_only=True
+    )
     status_display = serializers.CharField(
         source='get_status_display',
         read_only=True
     )
     is_expired = serializers.SerializerMethodField()
+    requires_both_sides = serializers.SerializerMethodField()
     
     class Meta:
         model = KYCDocument
@@ -25,18 +30,24 @@ class KYCDocumentSerializer(serializers.ModelSerializer):
             'id',
             'document_type',
             'document_type_display',
+            'document_side',
+            'document_side_display',
             'document_number',
             'issue_date',
             'expiry_date',
             'is_expired',
             'status',
             'status_display',
+            'requires_both_sides',
             'created_at',
         ]
         read_only_fields = ['id', 'status', 'created_at']
     
     def get_is_expired(self, obj):
         return obj.is_expired()
+    
+    def get_requires_both_sides(self, obj):
+        return KYCDocument.requires_both_sides(obj.document_type)
 
 
 class KYCProfileSerializer(serializers.ModelSerializer):
@@ -135,18 +146,41 @@ class CreateKYCProfileSerializer(serializers.ModelSerializer):
         return value
 
 
+
+
+
+
 class UploadKYCDocumentSerializer(serializers.ModelSerializer):
-    """Upload KYC document"""
+    """Upload KYC document with front/back support"""
     
     class Meta:
         model = KYCDocument
         fields = [
             'document_type',
+            'document_side',
             'document_file',
             'document_number',
             'issue_date',
             'expiry_date',
         ]
+    
+    def validate(self, attrs):
+        """Validate document upload"""
+        document_type = attrs.get('document_type')
+        document_side = attrs.get('document_side', DocumentSide.SINGLE)
+        
+        # Check if document requires both sides
+        if KYCDocument.requires_both_sides(document_type):
+            if document_side == DocumentSide.SINGLE:
+                raise serializers.ValidationError({
+                    'document_side': f'{document_type} requires front and back. Please specify "front" or "back".'
+                })
+        else:
+            # Single-sided documents should use SINGLE
+            if document_side != DocumentSide.SINGLE:
+                attrs['document_side'] = DocumentSide.SINGLE
+        
+        return attrs
     
     def validate_document_file(self, value):
         """Validate file size and type"""
@@ -178,3 +212,20 @@ class UploadKYCDocumentSerializer(serializers.ModelSerializer):
         validated_data['file_size'] = document_file.size
         
         return super().create(validated_data)
+
+
+class DocumentCompletenessSerializer(serializers.Serializer):
+    """Check document upload completeness"""
+    
+    document_type = serializers.ChoiceField(choices=KYCDocumentType.choices)
+    
+    def validate(self, attrs):
+        kyc_profile = self.context['kyc_profile']
+        document_type = attrs['document_type']
+        
+        completeness = KYCDocument.get_document_completeness(
+            kyc_profile, document_type
+        )
+        
+        attrs['completeness'] = completeness
+        return attrs

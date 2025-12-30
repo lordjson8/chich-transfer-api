@@ -20,14 +20,17 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             'id', 'email', 'phone', 'full_name', 'country',
-            'email_verified', 'phone_verified', 'kyc_status',
-            'kyc_level', 'two_factor_enabled', 'is_verified',
+            'email_verified', 'phone_verified',
+            # 'kyc_status',
+            # 'kyc_level', 
+            'two_factor_enabled', 'is_verified',
             'can_transfer', 'daily_limit', 'transaction_limit',
             'created_at'
         ]
         read_only_fields = [
             'id', 'email_verified', 'phone_verified',
-            'kyc_status', 'kyc_level', 'is_verified',
+            # 'kyc_status', 'kyc_level', 
+            'is_verified',
             'can_transfer', 'created_at'
         ]
 
@@ -290,25 +293,25 @@ class ResetPasswordSerializer(serializers.Serializer):
         write_only=True,
         style={'input_type': 'password'}
     )
-    password_confirm = serializers.CharField(
-        required=True,
-        write_only=True,
-        style={'input_type': 'password'}
-    )
+    # password_confirm = serializers.CharField(
+    #     required=True,
+    #     write_only=True,
+    #     style={'input_type': 'password'}
+    # )
     
-    def validate_password(self, value):
-        """Validate password strength"""
-        try:
-            validate_password(value)
-        except DjangoValidationError as e:
-            raise serializers.ValidationError(e.messages)
-        return value
+    # def validate_password(self, value):
+    #     """Validate password strength"""
+    #     try:
+    #         validate_password(value)
+    #     except DjangoValidationError as e:
+    #         raise serializers.ValidationError(e.messages)
+    #     return value
     
     def validate(self, attrs):
         """Verify passwords match and token is valid"""
         token = attrs.get('token')
         password = attrs.get('password')
-        password_confirm = attrs.get('password_confirm')
+        # password_confirm = attrs.get('password_confirm')
         
         # Verify token
         try:
@@ -324,10 +327,10 @@ class ResetPasswordSerializer(serializers.Serializer):
             )
         
         # Verify passwords match
-        if password != password_confirm:
-            raise serializers.ValidationError(
-                {"password_confirm": "Passwords do not match."}
-            )
+        # if password != password_confirm:
+        #     raise serializers.ValidationError(
+        #         {"password_confirm": "Passwords do not match."}
+        #     )
         
         attrs['user'] = reset_token.user
         attrs['reset_token'] = reset_token
@@ -370,11 +373,11 @@ class ChangePasswordSerializer(serializers.Serializer):
         write_only=True,
         style={'input_type': 'password'}
     )
-    new_password_confirm = serializers.CharField(
-        required=True,
-        write_only=True,
-        style={'input_type': 'password'}
-    )
+    # new_password_confirm = serializers.CharField(
+    #     required=True,
+    #     write_only=True,
+    #     style={'input_type': 'password'}
+    # )
     
     def validate_current_password(self, value):
         """Verify current password is correct"""
@@ -387,13 +390,13 @@ class ChangePasswordSerializer(serializers.Serializer):
         
         return value
     
-    def validate_new_password(self, value):
-        """Validate password strength"""
-        try:
-            validate_password(value)
-        except DjangoValidationError as e:
-            raise serializers.ValidationError(e.messages)
-        return value
+    # def validate_new_password(self, value):
+    #     """Validate password strength"""
+    #     try:
+    #         validate_password(value)
+    #     except DjangoValidationError as e:
+    #         raise serializers.ValidationError(e.messages)
+    #     return value
     
     def validate(self, attrs):
         """Verify new passwords match and are different"""

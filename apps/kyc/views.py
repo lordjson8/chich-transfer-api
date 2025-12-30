@@ -15,6 +15,8 @@ from .serializers import (
     CreateKYCProfileSerializer,
     UploadKYCDocumentSerializer,
     KYCDocumentSerializer,
+    DocumentSide,
+    DocumentCompletenessSerializer
 )
 
 logger = logging.getLogger(__name__)
@@ -124,11 +126,13 @@ class KYCProfileView(APIView):
         }, status=status.HTTP_201_CREATED)
 
 
+# apps/kyc/views.py
+
 class KYCDocumentUploadView(APIView):
-    """Upload KYC documents"""
+    """Upload KYC documents with front/back support"""
     permission_classes = [IsAuthenticated]
     parser_classes = (MultiPartParser, FormParser)
-    throttle_classes = [KYCThrottle]
+    # throttle_classes = [KYCThrottle]
     
     @transaction.atomic
     def post(self, request):
@@ -138,12 +142,22 @@ class KYCDocumentUploadView(APIView):
         POST /api/kyc/documents/upload/
         Content-Type: multipart/form-data
         
+        For two-sided documents (National ID, Driver's License):
         {
             "document_type": "national_id",
+            "document_side": "front",  # or "back"
             "document_file": <file>,
-            "document_number": "12345678",
+            "document_number": "CM123456789",
             "issue_date": "2020-01-01",
-            "expiry_date": "2025-01-01"
+            "expiry_date": "2030-01-01"
+        }
+        
+        For single-sided documents (Passport, Proof of Address):
+        {
+            "document_type": "passport",
+            "document_side": "single",  # optional, defaults to single
+            "document_file": <file>,
+            ...
         }
         """
         try:
@@ -158,19 +172,20 @@ class KYCDocumentUploadView(APIView):
         serializer = UploadKYCDocumentSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
-        # Check if document type already exists
+        document_type = serializer.validated_data['document_type']
+        document_side = serializer.validated_data.get('document_side', DocumentSide.SINGLE)
+        
+        # Check if this side already exists
         existing_doc = KYCDocument.objects.filter(
             kyc_profile=kyc_profile,
-            document_type=serializer.validated_data['document_type'],
-            status='approved'
+            document_type=document_type,
+            document_side=document_side,
         ).first()
         
         if existing_doc:
-            return Response({
-                'success': False,
-                'error': f'{serializer.validated_data["document_type"]} already verified',
-                'error_code': 'DOCUMENT_ALREADY_VERIFIED',
-            }, status=status.HTTP_400_BAD_REQUEST)
+            # Delete old document (replace)
+            existing_doc.document_file.delete()
+            existing_doc.delete()
         
         document = serializer.save(kyc_profile=kyc_profile)
         
@@ -178,12 +193,18 @@ class KYCDocumentUploadView(APIView):
         KYCVerificationLog.objects.create(
             kyc_profile=kyc_profile,
             action='document_added',
-            reason=f'Uploaded {document.get_document_type_display()}',
+            reason=f'Uploaded {document.get_document_type_display()} ({document.get_document_side_display()})',
             ip_address=get_client_ip(request)
         )
         
+        # Check completeness for two-sided documents
+        completeness = KYCDocument.get_document_completeness(
+            kyc_profile, document_type
+        )
+        
         logger.info(
-            f"Document uploaded for user: {request.user.id} - Type: {document.document_type}"
+            f"Document uploaded for user: {request.user.id} - "
+            f"Type: {document_type}, Side: {document_side}"
         )
         
         doc_serializer = KYCDocumentSerializer(document)
@@ -191,9 +212,51 @@ class KYCDocumentUploadView(APIView):
         return Response({
             'success': True,
             'message': 'Document uploaded successfully',
-            'data': doc_serializer.data
+            'data': {
+                **doc_serializer.data,
+                'completeness': completeness,
+            }
         }, status=status.HTTP_201_CREATED)
 
+
+class KYCDocumentCompletenessView(APIView):
+    """Check if document upload is complete"""
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        """
+        Check document completeness
+        
+        POST /api/kyc/documents/completeness/
+        {
+            "document_type": "national_id"
+        }
+        """
+        try:
+            kyc_profile = request.user.kyc_profile
+        except KYCProfile.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': 'KYC profile not found',
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        serializer = DocumentCompletenessSerializer(
+            data=request.data,
+            context={'kyc_profile': kyc_profile}
+        )
+        serializer.is_valid(raise_exception=True)
+        
+        completeness = serializer.validated_data['completeness']
+        document_type = serializer.validated_data['document_type']
+        
+        return Response({
+            'success': True,
+            'data': {
+                'document_type': document_type,
+                'requires_both_sides': KYCDocument.requires_both_sides(document_type),
+                **completeness,
+            }
+        }, status=status.HTTP_200_OK)
 
 class KYCDocumentsListView(APIView):
     """List user's KYC documents"""

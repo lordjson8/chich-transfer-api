@@ -17,30 +17,32 @@ def custom_exception_handler(exc, context):
     if response is not None:
         custom_response_data = {
             'success': False,
-            'error': None,
-            'error_code': None,
-            'data': None,
+             "error" : {
+                "message" : str(exc),
+                "code" : response.status_code,
+                "details": response.data
+            }
         }
         
         # Handle throttling specifically
         if isinstance(exc, Throttled):
-            custom_response_data['error'] = 'Too many requests. Please try again later.'
-            custom_response_data['error_code'] = 'RATE_LIMIT_EXCEEDED'
-            custom_response_data['retry_after'] = exc.wait
-        else:
-            # Get error message
-            if hasattr(response.data, 'get'):
-                detail = response.data.get('detail')
-                if detail:
-                    custom_response_data['error'] = str(detail)
-                else:
-                    custom_response_data['error'] = response.data
-            else:
-                custom_response_data['error'] = str(response.data)
+            custom_response_data['error']['message'] = 'Too many requests. Please try again later.'
+            custom_response_data['error']['code'] = 'RATE_LIMIT_EXCEEDED'
+            custom_response_data['error']['retry_after'] = exc.wait
+        # else:
+            # # Get error message
+            # if hasattr(response.data, 'get'):
+            #     detail = response.data.get('detail')
+            #     if detail:
+            #         custom_response_data['error'] = str(detail)
+            #     else:
+            #         custom_response_data['error'] = response.data
+            # else:
+            #     custom_response_data['error'] = str(response.data)
             
             # Get error code
-            if hasattr(exc, 'default_code'):
-                custom_response_data['error_code'] = exc.default_code.upper()
+            # if hasattr(exc, 'default_code'):
+            #     custom_response_data['error']['code'] = exc.default_code.upper()
         
         response.data = custom_response_data
     

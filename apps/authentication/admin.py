@@ -16,11 +16,13 @@ class UserAdmin(BaseUserAdmin):
     
     list_display = [
         'email', 'phone', 'full_name', 'country',
-        'kyc_status_badge', 'is_verified_badge',
+        # 'kyc_status_badge', 
+        'is_verified_badge',
         'two_factor_enabled', 'is_active', 'created_at'
     ]
     list_filter = [
-        'kyc_status', 'kyc_level', 'email_verified',
+        # 'kyc_status', 'kyc_level', 
+        'email_verified',
         'phone_verified', 'two_factor_enabled',
         'is_active', 'is_staff', 'country', 'created_at'
     ]
@@ -37,7 +39,7 @@ class UserAdmin(BaseUserAdmin):
         ('Verification Status', {
             'fields': (
                 'email_verified', 'phone_verified',
-                'kyc_status', 'kyc_level', 'kyc_verified_at'
+                # 'kyc_status', 'kyc_level', 'kyc_verified_at'
             )
         }),
         ('Security', {
@@ -73,24 +75,24 @@ class UserAdmin(BaseUserAdmin):
     
     readonly_fields = [
         'created_at', 'updated_at', 'last_login',
-        'kyc_verified_at'
+        # 'kyc_verified_at'
     ]
     
-    def kyc_status_badge(self, obj):
-        """Display KYC status with color badge"""
-        colors = {
-            'pending': 'gray',
-            'submitted': 'orange',
-            'approved': 'green',
-            'rejected': 'red',
-        }
-        color = colors.get(obj.kyc_status, 'gray')
-        return format_html(
-            '<span style="padding: 3px 10px; background-color: {}; '
-            'color: white; border-radius: 3px;">{}</span>',
-            color, obj.kyc_status.upper()
-        )
-    kyc_status_badge.short_description = 'KYC Status'
+    # def kyc_status_badge(self, obj):
+    #     """Display KYC status with color badge"""
+    #     colors = {
+    #         'pending': 'gray',
+    #         'submitted': 'orange',
+    #         'approved': 'green',
+    #         'rejected': 'red',
+    #     }
+    #     color = colors.get(obj.kyc_status, 'gray')
+    #     return format_html(
+    #         '<span style="padding: 3px 10px; background-color: {}; '
+    #         'color: white; border-radius: 3px;">{}</span>',
+    #         color, obj.kyc_status.upper()
+    #     )
+    # kyc_status_badge.short_description = 'KYC Status'
     
     def is_verified_badge(self, obj):
         """Display verification status"""

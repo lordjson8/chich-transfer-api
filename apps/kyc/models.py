@@ -30,6 +30,11 @@ class KYCVerificationStatus(models.TextChoices):
     REJECTED = 'rejected', 'Rejected'
     UNDER_REVIEW = 'under_review', 'Under Review'
 
+class DocumentSide(models.TextChoices):
+    """Document side for front/back uploads"""
+    FRONT = 'front', 'Front'
+    BACK = 'back', 'Back'
+    SINGLE = 'single', 'Single (No back required)'
 
 class KYCProfile(models.Model):
     """User KYC profile - tracks verification status"""
@@ -39,14 +44,14 @@ class KYCProfile(models.Model):
     # Personal Information
     first_name = models.CharField(max_length=100)
     last_name = models.CharField(max_length=100)
-    middle_name = models.CharField(max_length=100, blank=True)
+    middle_name = models.CharField(max_length=100, blank=True, null=True)
     date_of_birth = models.DateField()
     gender = models.CharField(
         max_length=10,
         choices=[
             ('male', 'Male'),
             ('female', 'Female'),
-            ('other', 'Other'),
+            # ('other', 'Other'),
         ]
     )
     nationality = models.CharField(max_length=100)
@@ -134,6 +139,14 @@ class KYCDocument(models.Model):
         max_length=50,
         choices=KYCDocumentType.choices
     )
+    
+    # NEW: Document side (front/back)
+    document_side = models.CharField(
+        max_length=10,
+        choices=DocumentSide.choices,
+        default=DocumentSide.SINGLE
+    )
+    
     document_file = models.FileField(
         upload_to='kyc_documents/%Y/%m/%d/',
         validators=[
@@ -159,7 +172,7 @@ class KYCDocument(models.Model):
     
     # Metadata
     file_size = models.BigIntegerField(help_text="Size in bytes")
-    file_hash = models.CharField(max_length=64, unique=True, db_index=True)
+    file_hash = models.CharField(max_length=64, db_index=True)  # Remove unique=True
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
@@ -168,9 +181,51 @@ class KYCDocument(models.Model):
         verbose_name_plural = "KYC Documents"
         ordering = ['-created_at']
         indexes = [
-            models.Index(fields=['kyc_profile', 'document_type']),
+            models.Index(fields=['kyc_profile', 'document_type', 'document_side']),
             models.Index(fields=['status']),
         ]
+        # NEW: Ensure only one front and one back per document type
+        unique_together = [['kyc_profile', 'document_type', 'document_side']]
+    
+    @classmethod
+    def requires_both_sides(cls, document_type):
+        """Check if document requires front and back"""
+        two_sided_documents = [
+            KYCDocumentType.NATIONAL_ID,
+            KYCDocumentType.DRIVERS_LICENSE,
+        ]
+        return document_type in two_sided_documents
+    
+    @classmethod
+    def get_document_completeness(cls, kyc_profile, document_type):
+        """Check if both sides are uploaded for two-sided documents"""
+        if not cls.requires_both_sides(document_type):
+            return {
+                'complete': cls.objects.filter(
+                    kyc_profile=kyc_profile,
+                    document_type=document_type
+                ).exists(),
+                'has_front': True,
+                'has_back': True,
+            }
+        
+        has_front = cls.objects.filter(
+            kyc_profile=kyc_profile,
+            document_type=document_type,
+            document_side=DocumentSide.FRONT
+        ).exists()
+        
+        has_back = cls.objects.filter(
+            kyc_profile=kyc_profile,
+            document_type=document_type,
+            document_side=DocumentSide.BACK
+        ).exists()
+        
+        return {
+            'complete': has_front and has_back,
+            'has_front': has_front,
+            'has_back': has_back,
+        }
     
     def is_expired(self):
         """Check if document is expired"""
@@ -179,7 +234,8 @@ class KYCDocument(models.Model):
         return False
     
     def __str__(self):
-        return f"{self.get_document_type_display()} - {self.kyc_profile.user.email}"
+        side_display = f" ({self.get_document_side_display()})" if self.document_side != DocumentSide.SINGLE else ""
+        return f"{self.get_document_type_display()}{side_display} - {self.kyc_profile.user.email}"
 
 
 class KYCVerificationLog(models.Model):

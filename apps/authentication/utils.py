@@ -65,6 +65,32 @@ def create_otp_verification(user, otp_type, sent_to, ip_address=None):
     
     return otp_verification, otp_code
 
+def send_reset_password_email(user, reset_token,request):
+    """Send password reset email"""
+    
+    subject = "Reset Your Password"
+    message = f"""
+    Hi {user.get_full_name() or user.email},
+    
+    We received a request to reset your password. Click the link below to set a new password:
+    
+    {reset_token}
+    
+    This link will expire in {settings.PASSWORD_RESET_TOKEN_EXPIRY_HOURS} hours.
+    
+    If you didn't request a password reset, please ignore this email.
+    
+    Best regards,
+    Money Transfer Team
+    """
+    
+    send_mail(
+        subject=subject,
+        message=message,
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[user.email],
+        fail_silently=False,
+    )
 
 def send_otp_email(email, otp_code, otp_type='verification'):
     # print(f"Sending OTP {otp_code} to email {email} for {otp_type}")

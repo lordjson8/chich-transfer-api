@@ -26,7 +26,7 @@ from .serializers import (
     ChangePasswordSerializer
 )
 from .utils import (
-    create_otp_verification, send_otp_email, send_otp_sms,
+    create_otp_verification, send_otp_email, send_otp_sms,send_reset_password_email,
     get_client_ip, generate_biometric_challenge,
     verify_biometric_signature
 )
@@ -719,7 +719,7 @@ class PasswordChangeThrottle(UserRateThrottle):
 class RequestPasswordResetView(APIView):
     """Request password reset link via email"""
     permission_classes = [AllowAny]
-    throttle_classes = [PasswordResetThrottle]
+    # throttle_classes = [PasswordResetThrottle]
     
     def post(self, request):
         """
@@ -743,18 +743,16 @@ class RequestPasswordResetView(APIView):
             reset_token = PasswordResetToken.create_token(
                 user=user,
                 ip_address=ip_address,
-                valid_for_hours=1
+                valid_for_hours=settings.PASSWORD_RESET_TOKEN_EXPIRY_HOURS
             )
             
+            from django.urls import reverse
+
+            # path = reverse('verify-res', kwargs={'pk': 42})
             # Send email with reset link
-            reset_link = f"{settings.FRONTEND_URL}/reset-password?token={reset_token.token}"
+            reset_link = f"{request.build_absolute_uri('/')}/reset-password?token={reset_token.token}"
             
-            # TODO: Send email
-            # send_password_reset_email(
-            #     email=user.email,
-            #     reset_link=reset_link,
-            #     user_name=user.full_name
-            # )
+            send_reset_password_email(user, reset_link, request)
             
             logger.info(f"Password reset requested for user: {user.id} from IP: {ip_address}")
             
@@ -803,7 +801,10 @@ class VerifyPasswordResetTokenView(APIView):
 class ResetPasswordView(APIView):
     """Reset password using token"""
     permission_classes = [AllowAny]
-    throttle_classes = [PasswordResetThrottle]
+    # throttle_classes = [PasswordResetThrottle # if password != password_confirm:
+        #     raise serializers.ValidationError(
+        #         {"password_confirm": "Passwords do not match."}
+        #     )]
     
     def post(self, request):
         """

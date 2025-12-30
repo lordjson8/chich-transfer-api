@@ -95,21 +95,21 @@ class User(AbstractUser):
         ('approved', 'Approved'),
         ('rejected', 'Rejected'),
     ]
-    kyc_status = models.CharField(
-        max_length=20,
-        choices=KYC_STATUS_CHOICES,
-        default='pending'
-    )
-    kyc_level = models.CharField(
-        max_length=20,
-        choices=[
-            ('none', 'None'),
-            ('basic', 'Basic'),
-            ('advanced', 'Advanced'),
-        ],
-        default='none'
-    )
-    kyc_verified_at = models.DateTimeField(null=True, blank=True)
+    # kyc_status = models.CharField(
+    #     max_length=20,
+    #     choices=KYC_STATUS_CHOICES,
+    #     default='pending'
+    # )
+    # kyc_level = models.CharField(
+    #     max_length=20,
+    #     choices=[
+    #         ('none', 'None'),
+    #         ('basic', 'Basic'),
+    #         ('advanced', 'Advanced'),
+    #     ],
+    #     default='none'
+    # )
+    # kyc_verified_at = models.DateTimeField(null=True, blank=True)
     
     # Security settings
     two_factor_enabled = models.BooleanField(default=False)
@@ -146,7 +146,7 @@ class User(AbstractUser):
         indexes = [
             models.Index(fields=['email', 'is_active']),
             models.Index(fields=['phone', 'is_active']),
-            models.Index(fields=['kyc_status']),
+            # models.Index(fields=['kyc_status']),
         ]
     
     def __str__(self):

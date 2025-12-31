@@ -149,9 +149,10 @@ class CreateKYCProfileSerializer(serializers.ModelSerializer):
 
 
 
+# apps/kyc/serializers.py
 
 class UploadKYCDocumentSerializer(serializers.ModelSerializer):
-    """Upload KYC document with front/back support"""
+    """Upload KYC document with front/back and selfie support"""
     
     class Meta:
         model = KYCDocument
@@ -169,14 +170,22 @@ class UploadKYCDocumentSerializer(serializers.ModelSerializer):
         document_type = attrs.get('document_type')
         document_side = attrs.get('document_side', DocumentSide.SINGLE)
         
+        # Selfie should always be SINGLE
+        if KYCDocument.is_selfie(document_type):
+            attrs['document_side'] = DocumentSide.SINGLE
+            # Selfie doesn't need document number, dates
+            attrs['document_number'] = ''
+            attrs['issue_date'] = None
+            attrs['expiry_date'] = None
+        
         # Check if document requires both sides
-        if KYCDocument.requires_both_sides(document_type):
+        elif KYCDocument.requires_both_sides(document_type):
             if document_side == DocumentSide.SINGLE:
                 raise serializers.ValidationError({
                     'document_side': f'{document_type} requires front and back. Please specify "front" or "back".'
                 })
         else:
-            # Single-sided documents should use SINGLE
+            # Single-sided documents
             if document_side != DocumentSide.SINGLE:
                 attrs['document_side'] = DocumentSide.SINGLE
         
@@ -190,11 +199,18 @@ class UploadKYCDocumentSerializer(serializers.ModelSerializer):
                 "File size must not exceed 10MB."
             )
         
-        # Check file type
+        # Check file type (images only for selfie)
         allowed_types = ['application/pdf', 'image/jpeg', 'image/png']
         if value.content_type not in allowed_types:
             raise serializers.ValidationError(
                 "Only PDF, JPEG, and PNG files are allowed."
+            )
+        
+        # Selfie must be image (not PDF)
+        document_type = self.initial_data.get('document_type')
+        if document_type == KYCDocumentType.SELFIE and value.content_type == 'application/pdf':
+            raise serializers.ValidationError(
+                "Selfie must be an image (JPEG or PNG), not PDF."
             )
         
         return value
@@ -204,6 +220,7 @@ class UploadKYCDocumentSerializer(serializers.ModelSerializer):
         document_file = validated_data['document_file']
         
         # Calculate file hash
+        import hashlib
         file_hash = hashlib.sha256()
         for chunk in document_file.chunks():
             file_hash.update(chunk)
@@ -212,6 +229,109 @@ class UploadKYCDocumentSerializer(serializers.ModelSerializer):
         validated_data['file_size'] = document_file.size
         
         return super().create(validated_data)
+
+
+class KYCLevelRequirementsSerializer(serializers.Serializer):
+    """Check requirements for KYC level upgrade"""
+    
+    target_level = serializers.ChoiceField(choices=KYCLevel.choices)
+    
+    def validate(self, attrs):
+        kyc_profile = self.context['kyc_profile']
+        target_level = attrs['target_level']
+        
+        requirements = KYCDocument.check_level_requirements(
+            kyc_profile, target_level
+        )
+        
+        attrs['requirements'] = requirements
+        return attrs
+
+
+class KYCProfileSerializer(serializers.ModelSerializer):
+    """Serialize KYC profile with document requirements"""
+    
+    kyc_level_display = serializers.CharField(
+        source='get_kyc_level_display',
+        read_only=True
+    )
+    verification_status_display = serializers.CharField(
+        source='get_verification_status_display',
+        read_only=True
+    )
+    documents = KYCDocumentSerializer(many=True, read_only=True)
+    transaction_limits = serializers.SerializerMethodField()
+    level_requirements = serializers.SerializerMethodField()  # NEW
+    
+    class Meta:
+        model = KYCProfile
+        fields = [
+            'id',
+            'first_name',
+            'last_name',
+            'middle_name',
+            'date_of_birth',
+            'gender',
+            'nationality',
+            'address_line_1',
+            'address_line_2',
+            'city',
+            'state_province',
+            'postal_code',
+            'country',
+            'kyc_level',
+            'kyc_level_display',
+            'verification_status',
+            'verification_status_display',
+            'is_verified',
+            'submitted_at',
+            'verified_at',
+            'rejected_at',
+            'rejection_reason',
+            'documents',
+            'transaction_limits',
+            'level_requirements',  # NEW
+            'created_at',
+            'updated_at',
+        ]
+        read_only_fields = [
+            'kyc_level',
+            'verification_status',
+            'is_verified',
+            'submitted_at',
+            'verified_at',
+            'rejected_at',
+            'rejection_reason',
+            'created_at',
+            'updated_at',
+        ]
+    
+    def get_transaction_limits(self, obj):
+        return obj.get_transaction_limit()
+    
+    def get_level_requirements(self, obj):
+        """Get requirements for next KYC level"""
+        current_level = obj.kyc_level
+        
+        level_order = [KYCLevel.BASIC, KYCLevel.INTERMEDIATE, KYCLevel.ADVANCED]
+        current_index = level_order.index(current_level)
+        
+        if current_index < len(level_order) - 1:
+            next_level = level_order[current_index + 1]
+            requirements = KYCDocument.check_level_requirements(obj, next_level)
+            return {
+                'next_level': next_level,
+                'next_level_display': dict(KYCLevel.choices)[next_level],
+                **requirements,
+            }
+        
+        return {
+            'next_level': None,
+            'next_level_display': 'Maximum level reached',
+            'eligible': True,
+            'missing_documents': [],
+            'uploaded_documents': [],
+        }
 
 
 class DocumentCompletenessSerializer(serializers.Serializer):

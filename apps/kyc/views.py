@@ -9,13 +9,14 @@ from django.utils import timezone
 from django.db import transaction
 import logging
 
-from .models import KYCProfile, KYCDocument, KYCVerificationLog
+from .models import KYCProfile, KYCDocument, KYCVerificationLog,KYCLevel, KYCDocumentType
 from .serializers import (
     KYCProfileSerializer,
     CreateKYCProfileSerializer,
     UploadKYCDocumentSerializer,
     KYCDocumentSerializer,
     DocumentSide,
+    KYCLevelRequirementsSerializer,
     DocumentCompletenessSerializer
 )
 
@@ -128,11 +129,13 @@ class KYCProfileView(APIView):
 
 # apps/kyc/views.py
 
+# apps/kyc/views.py
+
 class KYCDocumentUploadView(APIView):
-    """Upload KYC documents with front/back support"""
+    """Upload KYC documents including selfie"""
     permission_classes = [IsAuthenticated]
     parser_classes = (MultiPartParser, FormParser)
-    # throttle_classes = [KYCThrottle]
+    throttle_classes = [KYCThrottle]
     
     @transaction.atomic
     def post(self, request):
@@ -141,6 +144,12 @@ class KYCDocumentUploadView(APIView):
         
         POST /api/kyc/documents/upload/
         Content-Type: multipart/form-data
+        
+        For selfie:
+        {
+            "document_type": "selfie",
+            "document_file": <image file>
+        }
         
         For two-sided documents (National ID, Driver's License):
         {
@@ -155,8 +164,8 @@ class KYCDocumentUploadView(APIView):
         For single-sided documents (Passport, Proof of Address):
         {
             "document_type": "passport",
-            "document_side": "single",  # optional, defaults to single
             "document_file": <file>,
+            "document_number": "P123456789",
             ...
         }
         """
@@ -175,32 +184,53 @@ class KYCDocumentUploadView(APIView):
         document_type = serializer.validated_data['document_type']
         document_side = serializer.validated_data.get('document_side', DocumentSide.SINGLE)
         
-        # Check if this side already exists
-        existing_doc = KYCDocument.objects.filter(
-            kyc_profile=kyc_profile,
-            document_type=document_type,
-            document_side=document_side,
-        ).first()
-        
-        if existing_doc:
-            # Delete old document (replace)
-            existing_doc.document_file.delete()
-            existing_doc.delete()
+        # For selfie, only allow one upload
+        if KYCDocument.is_selfie(document_type):
+            existing_selfie = KYCDocument.objects.filter(
+                kyc_profile=kyc_profile,
+                document_type=KYCDocumentType.SELFIE,
+            ).first()
+            
+            if existing_selfie:
+                # Replace old selfie
+                existing_selfie.document_file.delete()
+                existing_selfie.delete()
+        else:
+            # Check if this side already exists
+            existing_doc = KYCDocument.objects.filter(
+                kyc_profile=kyc_profile,
+                document_type=document_type,
+                document_side=document_side,
+            ).first()
+            
+            if existing_doc:
+                # Replace old document
+                existing_doc.document_file.delete()
+                existing_doc.delete()
         
         document = serializer.save(kyc_profile=kyc_profile)
         
         # Log action
+        action_desc = 'Selfie' if KYCDocument.is_selfie(document_type) else f'{document.get_document_type_display()} ({document.get_document_side_display()})'
+        
         KYCVerificationLog.objects.create(
             kyc_profile=kyc_profile,
             action='document_added',
-            reason=f'Uploaded {document.get_document_type_display()} ({document.get_document_side_display()})',
+            reason=f'Uploaded {action_desc}',
             ip_address=get_client_ip(request)
         )
         
-        # Check completeness for two-sided documents
-        completeness = KYCDocument.get_document_completeness(
-            kyc_profile, document_type
-        )
+        # Check completeness
+        if KYCDocument.is_selfie(document_type):
+            completeness = {
+                'complete': True,
+                'has_front': True,
+                'has_back': True,
+            }
+        else:
+            completeness = KYCDocument.get_document_completeness(
+                kyc_profile, document_type
+            )
         
         logger.info(
             f"Document uploaded for user: {request.user.id} - "
@@ -218,6 +248,46 @@ class KYCDocumentUploadView(APIView):
             }
         }, status=status.HTTP_201_CREATED)
 
+
+class KYCLevelRequirementsView(APIView):
+    """Check requirements for KYC level upgrade"""
+    permission_classes = [IsAuthenticated]
+    
+    def post(self, request):
+        """
+        Check requirements for target KYC level
+        
+        POST /api/kyc/level-requirements/
+        {
+            "target_level": "advanced"
+        }
+        """
+        try:
+            kyc_profile = request.user.kyc_profile
+        except KYCProfile.DoesNotExist:
+            return Response({
+                'success': False,
+                'error': 'KYC profile not found',
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        serializer = KYCLevelRequirementsSerializer(
+            data=request.data,
+            context={'kyc_profile': kyc_profile}
+        )
+        serializer.is_valid(raise_exception=True)
+        
+        requirements = serializer.validated_data['requirements']
+        target_level = serializer.validated_data['target_level']
+        
+        return Response({
+            'success': True,
+            'data': {
+                'current_level': kyc_profile.kyc_level,
+                'target_level': target_level,
+                'target_level_display': dict(KYCLevel.choices)[target_level],
+                **requirements,
+            }
+        }, status=status.HTTP_200_OK)
 
 class KYCDocumentCompletenessView(APIView):
     """Check if document upload is complete"""

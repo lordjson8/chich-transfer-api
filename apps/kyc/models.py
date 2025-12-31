@@ -21,6 +21,8 @@ class KYCDocumentType(models.TextChoices):
     DRIVERS_LICENSE = 'drivers_license', "Driver's License"
     PROOF_OF_ADDRESS = 'proof_of_address', 'Proof of Address'
     BANK_STATEMENT = 'bank_statement', 'Bank Statement'
+    SELFIE = 'selfie', 'Selfie'  # NEW
+
 
 
 class KYCVerificationStatus(models.TextChoices):
@@ -195,6 +197,82 @@ class KYCDocument(models.Model):
             KYCDocumentType.DRIVERS_LICENSE,
         ]
         return document_type in two_sided_documents
+    
+    @classmethod
+    def requires_both_sides(cls, document_type):
+        """Check if document requires front and back"""
+        two_sided_documents = [
+            KYCDocumentType.NATIONAL_ID,
+            KYCDocumentType.DRIVERS_LICENSE,
+        ]
+        return document_type in two_sided_documents
+    
+    @classmethod
+    def is_selfie(cls, document_type):
+        """Check if document is a selfie"""
+        return document_type == KYCDocumentType.SELFIE
+    
+    @classmethod
+    def get_required_documents_for_level(cls, kyc_level):
+        """Get required documents for each KYC level"""
+        requirements = {
+            KYCLevel.BASIC: [],  # Just email + phone
+            KYCLevel.INTERMEDIATE: [
+                KYCDocumentType.NATIONAL_ID,  # or PASSPORT or DRIVERS_LICENSE
+                KYCDocumentType.PROOF_OF_ADDRESS,
+            ],
+            KYCLevel.ADVANCED: [
+                KYCDocumentType.NATIONAL_ID,  # or PASSPORT or DRIVERS_LICENSE
+                KYCDocumentType.PROOF_OF_ADDRESS,
+                KYCDocumentType.SELFIE,  # NEW: Required for advanced
+                KYCDocumentType.BANK_STATEMENT,
+            ],
+        }
+        return requirements.get(kyc_level, [])
+    
+    @classmethod
+    def check_level_requirements(cls, kyc_profile, target_level):
+        """
+        Check if user has uploaded all required documents for target KYC level
+        Returns: {
+            'eligible': bool,
+            'missing_documents': list,
+            'uploaded_documents': list
+        }
+        """
+        required = cls.get_required_documents_for_level(target_level)
+        uploaded = cls.objects.filter(
+            kyc_profile=kyc_profile,
+            status__in=[
+                KYCVerificationStatus.PENDING,
+                KYCVerificationStatus.UNDER_REVIEW,
+                KYCVerificationStatus.APPROVED,
+            ]
+        ).values_list('document_type', flat=True)
+        
+        # For ID documents, user needs at least one of: national_id, passport, drivers_license
+        id_docs = [
+            KYCDocumentType.NATIONAL_ID,
+            KYCDocumentType.PASSPORT,
+            KYCDocumentType.DRIVERS_LICENSE,
+        ]
+        
+        has_id_doc = any(doc in uploaded for doc in id_docs)
+        required_without_id = [doc for doc in required if doc not in id_docs]
+        
+        missing = []
+        if id_docs[0] in required and not has_id_doc:
+            missing.append('ID Document (National ID, Passport, or Driver\'s License)')
+        
+        for doc in required_without_id:
+            if doc not in uploaded:
+                missing.append(dict(KYCDocumentType.choices)[doc])
+        
+        return {
+            'eligible': len(missing) == 0,
+            'missing_documents': missing,
+            'uploaded_documents': list(uploaded),
+        }
     
     @classmethod
     def get_document_completeness(cls, kyc_profile, document_type):

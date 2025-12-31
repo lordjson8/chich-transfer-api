@@ -6,7 +6,7 @@ from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.utils.html import format_html
 from .models import (
     User, UserDevice, OTPVerification, 
-    BiometricChallenge, PasswordResetToken
+    BiometricChallenge, PasswordResetToken,PasswordHistory
 )
 
 
@@ -210,3 +210,63 @@ class PasswordResetTokenAdmin(admin.ModelAdmin):
         'used_at', 'ip_address'
     ]
     ordering = ['-created_at']
+
+
+@admin.register(PasswordHistory)
+class PasswordHistoryAdmin(admin.ModelAdmin):
+    """Password history admin (read-only security audit)"""
+
+    list_display = [
+        'user_email',
+        'reason',
+        'changed_at',
+        'ip_address',
+    ]
+
+    list_filter = [
+        'reason',
+        'changed_at',
+    ]
+
+    search_fields = [
+        'user__email',
+        'ip_address',
+    ]
+
+    ordering = ['-changed_at']
+
+    readonly_fields = [
+        'user',
+        'password_hash',
+        'changed_at',
+        'ip_address',
+        'reason',
+    ]
+
+    fieldsets = (
+        ('User', {
+            'fields': ('user',),
+        }),
+        ('Password Change Info', {
+            'fields': ('reason', 'changed_at'),
+        }),
+        ('Security Metadata', {
+            'fields': ('ip_address', 'password_hash'),
+            'classes': ('collapse',),
+        }),
+    )
+
+    def user_email(self, obj):
+        return obj.user.email
+
+    user_email.short_description = "User Email"
+    user_email.admin_order_field = "user__email"
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False

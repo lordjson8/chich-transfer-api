@@ -1,19 +1,19 @@
 # apps/routes/serializers.py
 
 from rest_framework import serializers
-from .models import Country, Corridor, CorridorFundingMethod, CorridorPayoutMethod
 
-
-class CountrySerializer(serializers.ModelSerializer):
-    """Serialize country data"""
-    
-    class Meta:
-        model = Country
-        fields = ['iso_code', 'name', 'phone_prefix']
+from rest_framework import serializers
+from .models import (
+    Country,
+    Corridor,
+    CorridorFundingMethod,
+    CorridorPayoutMethod,
+    PaymentMethodIcon,
+)
 
 
 class FundingMethodSerializer(serializers.ModelSerializer):
-    """Serialize funding methods"""
+    """Serialize funding methods with icons"""
     
     method_type_display = serializers.CharField(
         source='get_method_type_display',
@@ -23,6 +23,8 @@ class FundingMethodSerializer(serializers.ModelSerializer):
         source='get_mobile_provider_display',
         read_only=True
     )
+    icon_url = serializers.SerializerMethodField()
+    brand_color = serializers.SerializerMethodField()
     
     class Meta:
         model = CorridorFundingMethod
@@ -33,12 +35,20 @@ class FundingMethodSerializer(serializers.ModelSerializer):
             'mobile_provider',
             'mobile_provider_display',
             'card_scheme',
+            'icon_url',
+            'brand_color',
             'is_active',
         ]
+    
+    def get_icon_url(self, obj):
+        return obj.get_icon_url()
+    
+    def get_brand_color(self, obj):
+        return obj.get_brand_color()
 
 
 class PayoutMethodSerializer(serializers.ModelSerializer):
-    """Serialize payout methods"""
+    """Serialize payout methods with icons"""
     
     method_type_display = serializers.CharField(
         source='get_method_type_display',
@@ -48,6 +58,8 @@ class PayoutMethodSerializer(serializers.ModelSerializer):
         source='get_mobile_provider_display',
         read_only=True
     )
+    icon_url = serializers.SerializerMethodField()
+    brand_color = serializers.SerializerMethodField()
     
     class Meta:
         model = CorridorPayoutMethod
@@ -57,8 +69,73 @@ class PayoutMethodSerializer(serializers.ModelSerializer):
             'method_type_display',
             'mobile_provider',
             'mobile_provider_display',
+            'icon_url',
+            'brand_color',
             'is_active',
         ]
+    
+    def get_icon_url(self, obj):
+        return obj.get_icon_url()
+    
+    def get_brand_color(self, obj):
+        return obj.get_brand_color()
+
+
+class CountrySerializer(serializers.ModelSerializer):
+    """Serialize country data"""
+    
+    class Meta:
+        model = Country
+        fields = ['iso_code', 'name', 'phone_prefix']
+
+
+# class FundingMethodSerializer(serializers.ModelSerializer):
+#     """Serialize funding methods"""
+    
+#     method_type_display = serializers.CharField(
+#         source='get_method_type_display',
+#         read_only=True
+#     )
+#     mobile_provider_display = serializers.CharField(
+#         source='get_mobile_provider_display',
+#         read_only=True
+#     )
+    
+#     class Meta:
+#         model = CorridorFundingMethod
+#         fields = [
+#             'id',
+#             'method_type',
+#             'method_type_display',
+#             'mobile_provider',
+#             'mobile_provider_display',
+#             'card_scheme',
+#             'is_active',
+#         ]
+
+
+# class PayoutMethodSerializer(serializers.ModelSerializer):
+#     """Serialize payout methods"""
+    
+#     method_type_display = serializers.CharField(
+#         source='get_method_type_display',
+#         read_only=True
+#     )
+#     mobile_provider_display = serializers.CharField(
+#         source='get_mobile_provider_display',
+#         read_only=True
+#     )
+    
+#     class Meta:
+#         model = CorridorPayoutMethod
+#         fields = [
+#             'id',
+#             'method_type',
+#             'method_type_display',
+#             'mobile_provider',
+#             'mobile_provider_display',
+#             'is_active',
+#         ]
 
 
 class CorridorSerializer(serializers.ModelSerializer):

@@ -198,6 +198,7 @@ REST_FRAMEWORK = {
         'user': '1000/hour',
         'login': '5/minute',
         'otp': '3/minute',
+        "kyc" : '1000/minute',
         # 'password_reset': '5/hour',      # Request reset 5 times/hour
         'password_change': '10/day',     # Change password 10 times/day
     },

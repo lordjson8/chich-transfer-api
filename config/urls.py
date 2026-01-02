@@ -32,6 +32,7 @@ urlpatterns = [
     # API
     path('api/auth/', include('apps.authentication.urls')),
     path('api/kyc/', include('apps.kyc.urls')),
+     path('api/routes/', include('apps.routes.urls')),
     path('api/transfers/', include('apps.transfers.urls')),
     path('webhooks/awdpay/', awdpay_webhook),
     

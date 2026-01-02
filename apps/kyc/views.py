@@ -129,10 +129,8 @@ class KYCProfileView(APIView):
 
 # apps/kyc/views.py
 
-# apps/kyc/views.py
-
 class KYCDocumentUploadView(APIView):
-    """Upload KYC documents including selfie"""
+    """Upload KYC documents - back optional, selfie required for ID docs"""
     permission_classes = [IsAuthenticated]
     parser_classes = (MultiPartParser, FormParser)
     throttle_classes = [KYCThrottle]
@@ -145,28 +143,40 @@ class KYCDocumentUploadView(APIView):
         POST /api/kyc/documents/upload/
         Content-Type: multipart/form-data
         
-        For selfie:
+        SELFIE (Required with every ID document):
         {
             "document_type": "selfie",
-            "document_file": <image file>
+            "document_file": <image>
         }
         
-        For two-sided documents (National ID, Driver's License):
+        NATIONAL ID / DRIVER'S LICENSE (Front required, back optional):
         {
             "document_type": "national_id",
-            "document_side": "front",  # or "back"
+            "document_side": "front",  # Required
             "document_file": <file>,
             "document_number": "CM123456789",
             "issue_date": "2020-01-01",
             "expiry_date": "2030-01-01"
         }
         
-        For single-sided documents (Passport, Proof of Address):
+        {
+            "document_type": "national_id",
+            "document_side": "back",  # Optional
+            "document_file": <file>
+        }
+        
+        PASSPORT (No back side):
         {
             "document_type": "passport",
             "document_file": <file>,
             "document_number": "P123456789",
             ...
+        }
+        
+        OTHER DOCUMENTS (Proof of address, bank statement):
+        {
+            "document_type": "proof_of_address",
+            "document_file": <file>
         }
         """
         try:
@@ -184,7 +194,7 @@ class KYCDocumentUploadView(APIView):
         document_type = serializer.validated_data['document_type']
         document_side = serializer.validated_data.get('document_side', DocumentSide.SINGLE)
         
-        # For selfie, only allow one upload
+        # For selfie, only allow one
         if KYCDocument.is_selfie(document_type):
             existing_selfie = KYCDocument.objects.filter(
                 kyc_profile=kyc_profile,
@@ -196,7 +206,7 @@ class KYCDocumentUploadView(APIView):
                 existing_selfie.document_file.delete()
                 existing_selfie.delete()
         else:
-            # Check if this side already exists
+            # Replace if exists (for front or back)
             existing_doc = KYCDocument.objects.filter(
                 kyc_profile=kyc_profile,
                 document_type=document_type,
@@ -204,14 +214,18 @@ class KYCDocumentUploadView(APIView):
             ).first()
             
             if existing_doc:
-                # Replace old document
                 existing_doc.document_file.delete()
                 existing_doc.delete()
         
         document = serializer.save(kyc_profile=kyc_profile)
         
         # Log action
-        action_desc = 'Selfie' if KYCDocument.is_selfie(document_type) else f'{document.get_document_type_display()} ({document.get_document_side_display()})'
+        if KYCDocument.is_selfie(document_type):
+            action_desc = 'Selfie'
+        elif document_side == DocumentSide.BACK:
+            action_desc = f'{document.get_document_type_display()} (Back - Optional)'
+        else:
+            action_desc = f'{document.get_document_type_display()} ({document.get_document_side_display()})'
         
         KYCVerificationLog.objects.create(
             kyc_profile=kyc_profile,
@@ -221,16 +235,9 @@ class KYCDocumentUploadView(APIView):
         )
         
         # Check completeness
-        if KYCDocument.is_selfie(document_type):
-            completeness = {
-                'complete': True,
-                'has_front': True,
-                'has_back': True,
-            }
-        else:
-            completeness = KYCDocument.get_document_completeness(
-                kyc_profile, document_type
-            )
+        completeness = KYCDocument.get_document_completeness(
+            kyc_profile, document_type
+        )
         
         logger.info(
             f"Document uploaded for user: {request.user.id} - "
@@ -239,15 +246,20 @@ class KYCDocumentUploadView(APIView):
         
         doc_serializer = KYCDocumentSerializer(document)
         
+        # Provide helpful message
+        message = 'Document uploaded successfully'
+        if not completeness['complete']:
+            if not completeness['has_selfie'] and completeness['requires_selfie']:
+                message += '. Please upload a selfie for face verification.'
+        
         return Response({
             'success': True,
-            'message': 'Document uploaded successfully',
+            'message': message,
             'data': {
                 **doc_serializer.data,
                 'completeness': completeness,
             }
         }, status=status.HTTP_201_CREATED)
-
 
 class KYCLevelRequirementsView(APIView):
     """Check requirements for KYC level upgrade"""

@@ -191,21 +191,20 @@ class KYCDocument(models.Model):
     
     @classmethod
     def requires_both_sides(cls, document_type):
-        """Check if document requires front and back"""
-        two_sided_documents = [
-            KYCDocumentType.NATIONAL_ID,
-            KYCDocumentType.DRIVERS_LICENSE,
-        ]
-        return document_type in two_sided_documents
+        """Check if document requires front and back - BACK IS OPTIONAL NOW"""
+        # Return False since back is always optional
+        return False
     
     @classmethod
-    def requires_both_sides(cls, document_type):
-        """Check if document requires front and back"""
-        two_sided_documents = [
+    def requires_selfie(cls, document_type):
+        """Check if document type requires a selfie for verification"""
+        # All ID documents require selfie for face matching
+        requires_selfie_docs = [
             KYCDocumentType.NATIONAL_ID,
+            KYCDocumentType.PASSPORT,
             KYCDocumentType.DRIVERS_LICENSE,
         ]
-        return document_type in two_sided_documents
+        return document_type in requires_selfie_docs
     
     @classmethod
     def is_selfie(cls, document_type):
@@ -213,18 +212,91 @@ class KYCDocument(models.Model):
         return document_type == KYCDocumentType.SELFIE
     
     @classmethod
+    def get_document_completeness(cls, kyc_profile, document_type):
+        """
+        Check if document upload is complete
+        - Front is required
+        - Back is optional
+        - Selfie is required for ID documents
+        """
+        if cls.is_selfie(document_type):
+            has_selfie = cls.objects.filter(
+                kyc_profile=kyc_profile,
+                document_type=KYCDocumentType.SELFIE
+            ).exists()
+            
+            return {
+                'complete': has_selfie,
+                'has_front': has_selfie,
+                'has_back': True,  # N/A for selfie
+                'has_selfie': has_selfie,
+            }
+        
+        # Check for front (required)
+        has_front = cls.objects.filter(
+            kyc_profile=kyc_profile,
+            document_type=document_type,
+            document_side=DocumentSide.FRONT
+        ).exists()
+        
+        # Check for back (optional)
+        has_back = cls.objects.filter(
+            kyc_profile=kyc_profile,
+            document_type=document_type,
+            document_side=DocumentSide.BACK
+        ).exists()
+        
+        # Check for selfie (required for ID documents)
+        has_selfie = True  # Default for non-ID documents
+        if cls.requires_selfie(document_type):
+            has_selfie = cls.objects.filter(
+                kyc_profile=kyc_profile,
+                document_type=KYCDocumentType.SELFIE
+            ).exists()
+        
+        # Document is complete if:
+        # 1. Has front (required)
+        # 2. Has selfie (required for ID documents)
+        # Back is optional, so not checked for completeness
+        complete = has_front and has_selfie
+        
+        return {
+            'complete': complete,
+            'has_front': has_front,
+            'has_back': has_back,  # Optional
+            'has_selfie': has_selfie,
+            'requires_selfie': cls.requires_selfie(document_type),
+        }
+    
+    @classmethod
     def get_required_documents_for_level(cls, kyc_level):
         """Get required documents for each KYC level"""
         requirements = {
             KYCLevel.BASIC: [],  # Just email + phone
             KYCLevel.INTERMEDIATE: [
-                KYCDocumentType.NATIONAL_ID,  # or PASSPORT or DRIVERS_LICENSE
+                # User must provide ONE of these ID documents + selfie
+                {
+                    'type': 'id_document',
+                    'options': [
+                        KYCDocumentType.NATIONAL_ID,
+                        KYCDocumentType.PASSPORT,
+                        KYCDocumentType.DRIVERS_LICENSE,
+                    ],
+                    'selfie_required': True,  # Must also upload selfie
+                },
                 KYCDocumentType.PROOF_OF_ADDRESS,
             ],
             KYCLevel.ADVANCED: [
-                KYCDocumentType.NATIONAL_ID,  # or PASSPORT or DRIVERS_LICENSE
+                {
+                    'type': 'id_document',
+                    'options': [
+                        KYCDocumentType.NATIONAL_ID,
+                        KYCDocumentType.PASSPORT,
+                        KYCDocumentType.DRIVERS_LICENSE,
+                    ],
+                    'selfie_required': True,
+                },
                 KYCDocumentType.PROOF_OF_ADDRESS,
-                KYCDocumentType.SELFIE,  # NEW: Required for advanced
                 KYCDocumentType.BANK_STATEMENT,
             ],
         }
@@ -237,10 +309,11 @@ class KYCDocument(models.Model):
         Returns: {
             'eligible': bool,
             'missing_documents': list,
-            'uploaded_documents': list
+            'uploaded_documents': list,
+            'selfie_status': dict
         }
         """
-        required = cls.get_required_documents_for_level(target_level)
+        requirements = cls.get_required_documents_for_level(target_level)
         uploaded = cls.objects.filter(
             kyc_profile=kyc_profile,
             status__in=[
@@ -248,30 +321,186 @@ class KYCDocument(models.Model):
                 KYCVerificationStatus.UNDER_REVIEW,
                 KYCVerificationStatus.APPROVED,
             ]
-        ).values_list('document_type', flat=True)
+        )
         
-        # For ID documents, user needs at least one of: national_id, passport, drivers_license
+        uploaded_types = list(uploaded.values_list('document_type', flat=True))
+        
+        # Check for ID document
         id_docs = [
             KYCDocumentType.NATIONAL_ID,
             KYCDocumentType.PASSPORT,
             KYCDocumentType.DRIVERS_LICENSE,
         ]
         
-        has_id_doc = any(doc in uploaded for doc in id_docs)
-        required_without_id = [doc for doc in required if doc not in id_docs]
+        has_id_doc = any(doc in uploaded_types for doc in id_docs)
+        has_selfie = KYCDocumentType.SELFIE in uploaded_types
         
         missing = []
-        if id_docs[0] in required and not has_id_doc:
-            missing.append('ID Document (National ID, Passport, or Driver\'s License)')
+        selfie_status = {
+            'required': False,
+            'uploaded': has_selfie,
+        }
         
-        for doc in required_without_id:
-            if doc not in uploaded:
-                missing.append(dict(KYCDocumentType.choices)[doc])
+        for requirement in requirements:
+            if isinstance(requirement, dict) and requirement['type'] == 'id_document':
+                if not has_id_doc:
+                    missing.append('ID Document (National ID, Passport, or Driver\'s License) - Front side required')
+                
+                if requirement.get('selfie_required') and not has_selfie:
+                    missing.append('Selfie (for face verification with your ID)')
+                    selfie_status['required'] = True
+            else:
+                if requirement not in uploaded_types:
+                    missing.append(dict(KYCDocumentType.choices)[requirement])
         
         return {
             'eligible': len(missing) == 0,
             'missing_documents': missing,
-            'uploaded_documents': list(uploaded),
+            'uploaded_documents': uploaded_types,
+            'selfie_status': selfie_status,
+        }
+    
+    @classmethod
+    def get_required_documents_for_level(cls, kyc_level):
+        """
+        Get required documents for each KYC level
+        Returns list of tuples: (document_type, requires_front, requires_selfie)
+        """
+        requirements = {
+            KYCLevel.BASIC: [],  # Just email + phone
+            
+            KYCLevel.INTERMEDIATE: [
+                # At least one ID document (front mandatory)
+                {
+                    'category': 'id_document',
+                    'options': [
+                        KYCDocumentType.NATIONAL_ID,
+                        KYCDocumentType.PASSPORT,
+                        KYCDocumentType.DRIVERS_LICENSE,
+                    ],
+                    'requires_front': True,
+                    'requires_back': False,
+                },
+                 {
+                    'category': 'selfie',
+                    'document_type': KYCDocumentType.SELFIE,
+                    'required': True,
+                },
+                # Proof of address
+                # {
+                #     'category': 'proof_of_address',
+                #     'document_type': KYCDocumentType.PROOF_OF_ADDRESS,
+                #     'required': True,
+                # },
+            ],
+            
+            KYCLevel.ADVANCED: [
+                # ID document (front mandatory)
+                {
+                    'category': 'id_document',
+                    'options': [
+                        KYCDocumentType.NATIONAL_ID,
+                        KYCDocumentType.PASSPORT,
+                        KYCDocumentType.DRIVERS_LICENSE,
+                    ],
+                    'requires_front': True,
+                    'requires_back': False,
+                },
+                # Proof of address
+                {
+                    'category': 'proof_of_address',
+                    'document_type': KYCDocumentType.PROOF_OF_ADDRESS,
+                    'required': True,
+                },
+                # Selfie (MANDATORY)
+                {
+                    'category': 'selfie',
+                    'document_type': KYCDocumentType.SELFIE,
+                    'required': True,
+                },
+                # Bank statement
+                {
+                    'category': 'bank_statement',
+                    'document_type': KYCDocumentType.BANK_STATEMENT,
+                    'required': True,
+                },
+            ],
+        }
+        return requirements.get(kyc_level, [])
+    
+    @classmethod
+    def check_level_requirements(cls, kyc_profile, target_level):
+        """
+        Check if user has uploaded all required documents for target KYC level
+        Front + Selfie are mandatory, back is optional
+        """
+        requirements = cls.get_required_documents_for_level(target_level)
+        uploaded = cls.objects.filter(
+            kyc_profile=kyc_profile,
+            status__in=[
+                KYCVerificationStatus.PENDING,
+                KYCVerificationStatus.UNDER_REVIEW,
+                KYCVerificationStatus.APPROVED,
+            ]
+        )
+        
+        missing = []
+        uploaded_list = []
+        
+        for req in requirements:
+            category = req.get('category')
+            
+            if category == 'id_document':
+                # Check if user has at least one ID document with FRONT
+                id_options = req.get('options', [])
+                has_id_front = uploaded.filter(
+                    document_type__in=id_options,
+                    document_side=DocumentSide.FRONT
+                ).exists()
+                
+                if not has_id_front:
+                    missing.append('ID Document (Front side - National ID, Passport, or Driver\'s License)')
+                else:
+                    # Find which ID they uploaded
+                    id_doc = uploaded.filter(
+                        document_type__in=id_options,
+                        document_side=DocumentSide.FRONT
+                    ).first()
+                    uploaded_list.append(f"{dict(KYCDocumentType.choices)[id_doc.document_type]} (Front)")
+                    
+                    # Check if back is also uploaded (optional, just for info)
+                    has_back = uploaded.filter(
+                        document_type=id_doc.document_type,
+                        document_side=DocumentSide.BACK
+                    ).exists()
+                    if has_back:
+                        uploaded_list.append(f"{dict(KYCDocumentType.choices)[id_doc.document_type]} (Back - optional)")
+            
+            elif category == 'selfie':
+                # Selfie is MANDATORY for advanced
+                has_selfie = uploaded.filter(
+                    document_type=KYCDocumentType.SELFIE
+                ).exists()
+                
+                if not has_selfie:
+                    missing.append('Selfie (Mandatory)')
+                else:
+                    uploaded_list.append('Selfie')
+            
+            else:
+                # Other documents (proof_of_address, bank_statement)
+                doc_type = req.get('document_type')
+                has_doc = uploaded.filter(document_type=doc_type).exists()
+                
+                if not has_doc:
+                    missing.append(dict(KYCDocumentType.choices)[doc_type])
+                else:
+                    uploaded_list.append(dict(KYCDocumentType.choices)[doc_type])
+        
+        return {
+            'eligible': len(missing) == 0,
+            'missing_documents': missing,
+            'uploaded_documents': uploaded_list,
         }
     
     @classmethod

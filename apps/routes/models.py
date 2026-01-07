@@ -60,7 +60,7 @@ class MobileMoneyProvider(models.TextChoices):
 class PaymentMethodIcon:
     """Static class to manage payment method icons and colors"""
     
-    ICON_BASE_URL = "http://10.238.85.58:8000/media/payment-icons/"
+    ICON_BASE_URL = "http://192.168.100.30:8000/media/payment-icons/"
     
     ICONS = {
         'mtn_cm': 'mtn-logo.png',

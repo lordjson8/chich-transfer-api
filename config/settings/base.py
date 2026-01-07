@@ -329,6 +329,8 @@ EMAIL_HOST_USER = config('EMAIL_HOST_USER', default='')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD', default='')
 DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='noreply@moneytransfer.com')
 
+# print(EMAIL_BACKEND,EMAIL_HOST,EMAIL_HOST_PASSWORD,EMAIL_HOST_USER,EMAIL_USE_TLS)
+
 # ============================================================================
 # PHONE NUMBER FIELD
 # ============================================================================

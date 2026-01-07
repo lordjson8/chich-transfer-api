@@ -25,10 +25,10 @@ class PaymentMethodSerializer(serializers.ModelSerializer):
         source='get_type_category_display',
         read_only=True
     )
-    display_name = serializers.CharField(
-        source='get_display_name',
-        read_only=True
-    )
+    # display_name = serializers.CharField(
+    #     source='get_display_name',
+    #     read_only=True
+    # )
     icon_url = serializers.SerializerMethodField()
     brand_color = serializers.SerializerMethodField()
     
@@ -44,7 +44,7 @@ class PaymentMethodSerializer(serializers.ModelSerializer):
             'mobile_provider',
             'mobile_provider_display',
             'card_scheme',
-            'display_name',
+            # 'display_name',
             'icon_url',
             'brand_color',
             'priority',

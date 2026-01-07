@@ -88,7 +88,7 @@ class FundingMethodsView(APIView):
     
     def get(self, request):
         source_code = request.query_params.get('country')
-        
+        print(request.user.country)
         if not source_code:
             # Get from user's country if available
             try:
@@ -173,7 +173,7 @@ class TransferFlowView(APIView):
     """
     ✨ NEW: Complete transfer flow endpoint
     
-    GET /api/routes/transfer-flow/?source=CM&destination=CI&funding_method=mtn_cm&payout_method=mtn_ci
+    GET /api/routes/transfer-flow/?source=CM&destination=CI&funding_method=1&payout_method=2
     
     Returns:
     - Source country funding methods

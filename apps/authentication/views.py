@@ -12,8 +12,6 @@ from django.conf import settings
 from datetime import timedelta
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExample
 from drf_spectacular.types import OpenApiTypes
-
-
 from .models import User, UserDevice, OTPVerification, BiometricChallenge,PasswordResetToken
 from .serializers import (
     UserSerializer, UserRegistrationSerializer, LoginSerializer,
@@ -23,7 +21,8 @@ from .serializers import (
     VerifyPasswordResetTokenSerializer,
     RequestPasswordResetSerializer, 
     ResetPasswordSerializer,
-    ChangePasswordSerializer
+    ChangePasswordSerializer,
+    UpdateUserProfileSerializer
 )
 from .utils import (
     create_otp_verification, send_otp_email, send_otp_sms,send_reset_password_email,
@@ -245,15 +244,19 @@ class UserProfileView(generics.RetrieveUpdateAPIView):
     PATCH /api/auth/profile
     """
     permission_classes = [IsAuthenticated]
-    serializer_class = UserSerializer
     
     def get_object(self):
         return self.request.user
 
+    def get_serializer_class(self):
+        if self.request.method in ['PUT', 'PATCH']:
+            return UpdateUserProfileSerializer
+        return UserSerializer
+
 
 class LogoutView(APIView):
     """
-    Logout user (blacklist refresh token)
+    Logout user (blacklist refresh token) 
     
     POST /api/auth/logout
     {
@@ -876,3 +879,78 @@ class ChangePasswordView(APIView):
                 'email': user.email
             }
         }, status=status.HTTP_200_OK)
+
+
+
+
+
+class MeView(generics.RetrieveAPIView):
+    """
+    GET /api/me/
+    
+    Retrieve authenticated user's profile with KYC, documents, and limits
+    """
+    
+    serializer_class = UserSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_object(self):
+        """
+        Return the authenticated user with optimized queries
+        """
+        return User.objects.select_related(
+            'kyc_profile'  # Avoid N+1 query for KYC profile
+        ).prefetch_related(
+            'kyc_profile__documents'  # Prefetch KYC documents
+        ).get(pk=self.request.user.pk)
+    
+    def retrieve(self, request, *args, **kwargs):
+        """
+        Custom retrieve to handle missing KYC profile gracefully
+        """
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        
+        # If user has no KYC profile, create a default one
+        if not hasattr(instance, 'kyc_profile'):
+            from apps.kyc.models import KYCProfile
+            KYCProfile.objects.create(
+                user=instance,
+                level='LEVEL_0',
+                status='pending'
+            )
+            # Re-fetch with KYC profile
+            instance = self.get_object()
+            serializer = self.get_serializer(instance)
+        
+        return Response(serializer.data)
+
+
+class UpdateProfileView(generics.UpdateAPIView):
+    """
+    PATCH /api/me/
+    
+    Update basic profile info (not KYC)
+    """
+    
+    serializer_class = UpdateUserProfileSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_object(self):
+        return self.request.user
+    
+    def update(self, request, *args, **kwargs):
+        partial = kwargs.pop('partial', False)
+        instance = self.get_object()
+        
+        # Only allow updating certain fields
+        allowed_fields = ['email', 'first_name', 'last_name']
+        data = {k: v for k, v in request.data.items() if k in allowed_fields}
+        
+        serializer = self.get_serializer(instance, data=data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        
+        # Return full profile with KYC
+        full_serializer = UserProfileSerializer(instance)
+        return Response(full_serializer.data)

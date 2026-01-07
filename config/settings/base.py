@@ -198,7 +198,8 @@ REST_FRAMEWORK = {
         'user': '1000/hour',
         'login': '5/minute',
         'otp': '3/minute',
-        "kyc" : '1000/minute',
+        "kyc": '1000/minute',
+        "transaction": '1000/minute',
         # 'password_reset': '5/hour',      # Request reset 5 times/hour
         'password_change': '10/day',     # Change password 10 times/day
     },
@@ -357,7 +358,7 @@ TRANSFER_QUOTE_VALIDITY_MINUTES = 5
 # AwdPay Integration
 AWDPAY_API_KEY = config('AWDPAY_API_KEY', default='')
 AWDPAY_API_SECRET = config('AWDPAY_API_SECRET', default='')
-AWDPAY_BASE_URL = config('AWDPAY_BASE_URL', default='https://api.awdpay.com/v1')
+AWDPAY_API_URL = config('AWDPAY_BASE_URL', default='https://api.awdpay.com/v1')
 AWDPAY_WEBHOOK_SECRET = config('AWDPAY_WEBHOOK_SECRET', default='')
 
 # SMS Provider (example: Africa's Talking)
@@ -433,3 +434,4 @@ SPECTACULAR_SETTINGS = {
 }
 
 PASSWORD_RESET_TOKEN_EXPIRY_HOURS = config('PASSWORD_RESET_TOKEN_EXPIRY_HOURS', default=1, cast=int)
+

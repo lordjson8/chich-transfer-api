@@ -7,6 +7,8 @@ from django.contrib.auth.password_validation import validate_password
 from phonenumber_field.serializerfields import PhoneNumberField
 from .models import User, UserDevice, OTPVerification,PasswordHistory, PasswordResetToken
 from .utils import verify_otp, validate_public_key
+from apps.kyc.models import KYCProfile, KYCLevel, KYCVerificationStatus
+from apps.kyc.serializers import CreateKYCProfileSerializer
 
 
 # ============================================================================
@@ -14,25 +16,121 @@ from .utils import verify_otp, validate_public_key
 # ============================================================================
 
 class UserSerializer(serializers.ModelSerializer):
-    """Basic user serializer"""
+    """Basic user serializer with KYC information"""
+    kyc_status = serializers.SerializerMethodField()
+    kyc_level = serializers.SerializerMethodField()
+    transaction_limits = serializers.SerializerMethodField()
     
     class Meta:
         model = User
         fields = [
             'id', 'email', 'phone', 'full_name', 'country',
             'email_verified', 'phone_verified',
-            # 'kyc_status',
-            # 'kyc_level', 
+            'kyc_status',
+            'kyc_level', 
             'two_factor_enabled', 'is_verified',
-            'can_transfer', 'daily_limit', 'transaction_limit',
+            'can_transfer', 
+            'transaction_limits',
             'created_at'
         ]
         read_only_fields = [
             'id', 'email_verified', 'phone_verified',
-            # 'kyc_status', 'kyc_level', 
+            'kyc_status', 'kyc_level', 
             'is_verified',
-            'can_transfer', 'created_at'
+            'can_transfer', 'created_at', 'transaction_limits'
         ]
+
+    def get_kyc_status(self, obj):
+        """
+        Get KYC verification status.
+        """
+        try:
+            return obj.kyc_profile.verification_status
+        except KYCProfile.DoesNotExist:
+            return KYCVerificationStatus.NOT_SUBMITTED
+
+    def get_kyc_level(self, obj):
+        """
+        Get KYC verification level.
+        """
+        try:
+            return obj.kyc_profile.kyc_level
+        except KYCProfile.DoesNotExist:
+            return KYCLevel.BASIC
+
+    def get_transaction_limits(self, obj):
+        """
+        Get transaction limits and remaining balances based on KYC level.
+        """
+        from apps.transfers.models import Transfer, TransferStatus
+        from django.utils import timezone
+        from django.db.models import Sum
+
+        try:
+            limits = obj.kyc_profile.get_transaction_limit()
+        except KYCProfile.DoesNotExist:
+            # Return basic limits for users without a KYC profile
+            limits = {
+                'monthly_limit': 500_000,
+                'daily_limit': 100_000,
+                'transaction_limit': 50_000,
+            }
+        
+        today = timezone.now().date()
+        start_of_month = today.replace(day=1)
+        
+        # Get successful transfers for the current month
+        successful_transfers = Transfer.objects.filter(
+            user=obj,
+            created_at__date__gte=start_of_month,
+            status=TransferStatus.COMPLETED
+        )
+
+        # Monthly usage
+        monthly_usage = successful_transfers.aggregate(total=Sum('amount'))['total'] or 0
+
+        # Daily usage (filter monthly transfers further)
+        daily_transfers = successful_transfers.filter(created_at__date=today)
+        daily_usage = daily_transfers.aggregate(total=Sum('amount'))['total'] or 0
+        
+        limits['daily_usage'] = float(daily_usage)
+        limits['monthly_usage'] = float(monthly_usage)
+        limits['remaining_daily_limit'] = float(limits['daily_limit']) - float(daily_usage)
+        limits['remaining_monthly_limit'] = float(limits['monthly_limit']) - float(monthly_usage)
+
+        return limits
+
+
+class UpdateUserProfileSerializer(serializers.ModelSerializer):
+    """Serializer for updating user profile including KYC data."""
+    
+    kyc_profile = CreateKYCProfileSerializer(required=False)
+
+    class Meta:
+        model = User
+        fields = (
+            'full_name',
+            'country',
+            'kyc_profile',
+        )
+
+    def update(self, instance, validated_data):
+        # Pop nested kyc_profile data
+        kyc_data = validated_data.pop('kyc_profile', None)
+        
+        # Update User fields
+        instance = super().update(instance, validated_data)
+        
+        # Update or Create KYCProfile
+        if kyc_data:
+            from apps.kyc.models import KYCProfile
+            # Use the KYC serializer to update/create the KYC profile
+            kyc_profile, _ = KYCProfile.objects.get_or_create(user=instance)
+            kyc_serializer = CreateKYCProfileSerializer(kyc_profile, data=kyc_data, partial=True)
+            kyc_serializer.is_valid(raise_exception=True)
+            kyc_serializer.save()
+
+        return instance
 
 
 class UserRegistrationSerializer(serializers.ModelSerializer):
@@ -170,6 +268,7 @@ class OTPVerificationSerializer(serializers.Serializer):
         ).order_by('-created_at').first()
         
         if not otp_verification:
+            print("hello")
             raise serializers.ValidationError('No OTP found. Please request a new one.')
         
         if not otp_verification.can_attempt():

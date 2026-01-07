@@ -352,3 +352,4 @@ class KYCLevelRequirementsSerializer(serializers.Serializer):
         
 #         attrs['completeness'] = completeness
 #         return attrs
+

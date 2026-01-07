@@ -26,6 +26,9 @@ urlpatterns = [
     
     # User Profile
     path('profile/', views.UserProfileView.as_view(), name='profile'),
+    path('me/', views.MeView.as_view(), name='me'),
+    path('me/update/', views.UpdateProfileView.as_view(), name='update-profile'),
+
     
     # JWT Token
     path('token/refresh/', TokenRefreshView.as_view(), name='token-refresh'),

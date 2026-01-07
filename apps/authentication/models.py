@@ -116,16 +116,16 @@ class User(AbstractUser):
     pin_hash = models.CharField(max_length=255, blank=True)
     
     # Transaction limits (in EUR)
-    daily_limit = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        default=5000.00
-    )
-    transaction_limit = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        default=1000.00
-    )
+    # daily_limit = models.DecimalField(
+    #     max_digits=10,
+    #     decimal_places=2,
+    #     default=5000.00
+    # )
+    # transaction_limit = models.DecimalField(
+    #     max_digits=10,
+    #     decimal_places=2,
+    #     default=1000.00
+    # )
     
     # Metadata
     last_login_ip = models.GenericIPAddressField(null=True, blank=True)

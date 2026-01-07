@@ -4,259 +4,329 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from django.db.models import Prefetch
+from django.db.models import Q
+from django.shortcuts import get_object_or_404
 
-from .models import Country, Corridor, CorridorFundingMethod, CorridorPayoutMethod
+from .models import Country, PaymentMethod, Corridor
 from .serializers import (
     CountrySerializer,
+    PaymentMethodSerializer,
+    CountryWithPaymentMethodsSerializer,
     CorridorSerializer,
     CorridorListSerializer,
-    FundingMethodSerializer,
-    PayoutMethodSerializer,
+    TransferFlowSerializer,
 )
 
 
 class CountryListView(APIView):
-    """List all supported countries"""
+    """
+    GET /api/routes/countries/
+    
+    List all supported countries with their payment methods
+    """
     permission_classes = [AllowAny]
     
     def get(self, request):
-        """
-        Get all supported countries
+        # Optionally include payment methods
+        include_methods = request.query_params.get('include_methods', 'true').lower() == 'true'
         
-        GET /api/routes/countries/
-        """
-        countries = Country.objects.all().order_by('name')
-        serializer = CountrySerializer(countries, many=True)
+        countries = Country.objects.filter(is_active=True).order_by('name')
+        
+        if include_methods:
+            countries = countries.prefetch_related('payment_methods')
+            serializer = CountryWithPaymentMethodsSerializer(countries, many=True)
+        else:
+            serializer = CountrySerializer(countries, many=True)
         
         return Response({
             'success': True,
             'data': serializer.data,
             'count': countries.count(),
-        }, status=status.HTTP_200_OK)
+        })
 
 
-class CorridorListView(APIView):
-    """List available corridors for a user"""
-    permission_classes = [IsAuthenticated]
+class CountryPaymentMethodsView(APIView):
+    """
+    GET /api/routes/countries/{iso_code}/payment-methods/
     
-    def get(self, request):
-        """
-        Get available corridors from user's country
+    Get all payment methods available in a specific country
+    """
+    permission_classes = [AllowAny]
+    
+    def get(self, request, iso_code):
+        country = get_object_or_404(Country, iso_code=iso_code.upper(), is_active=True)
         
-        GET /api/routes/corridors/
-        GET /api/routes/corridors/?source_country=CM
-        GET /api/routes/corridors/?destination_country=CI
-        """
-        # Get source country from query param or user's country
-        source_country_code = request.query_params.get('source_country')
-        destination_country_code = request.query_params.get('destination_country')
+        # Filter by usage type if specified
+        method_type = request.query_params.get('type')  # 'funding' or 'payout'
         
-        # If no source specified, try to get from user's country
-        if not source_country_code:
-            try:
-                source_country_code = request.user.country.iso_code
-            except AttributeError:
-                return Response({
-                    'success': False,
-                    'error': 'Please specify source_country or update your profile with your country.',
-                }, status=status.HTTP_400_BAD_REQUEST)
+        methods = country.payment_methods.filter(is_active=True)
         
-        # Filter corridors
-        corridors = Corridor.objects.filter(
-            source_country__iso_code=source_country_code,
-            is_active=True
-        ).select_related(
-            'source_country',
-            'destination_country'
-        )
-        
-        # Further filter by destination if specified
-        if destination_country_code:
-            corridors = corridors.filter(
-                destination_country__iso_code=destination_country_code
+        if method_type in ['funding', 'payout']:
+            methods = methods.filter(
+                Q(type_category=method_type) | Q(type_category='both')
             )
         
-        serializer = CorridorListSerializer(corridors, many=True)
+        methods = methods.order_by('-priority', 'method_type')
+        serializer = PaymentMethodSerializer(methods, many=True)
         
         return Response({
             'success': True,
-            'data': serializer.data,
-            'count': corridors.count(),
-        }, status=status.HTTP_200_OK)
+            'country': CountrySerializer(country).data,
+            'payment_methods': serializer.data,
+            'count': methods.count(),
+        })
 
 
-class CorridorDetailView(APIView):
-    """Get detailed corridor info with payment methods"""
-    permission_classes = [IsAuthenticated]
+class FundingMethodsView(APIView):
+    """
+    GET /api/routes/funding-methods/
     
-    def get(self, request, corridor_id):
-        """
-        Get corridor details with payment methods
-        
-        GET /api/routes/corridors/{id}/
-        """
-        try:
-            corridor = Corridor.objects.prefetch_related(
-                Prefetch(
-                    'funding_methods',
-                    queryset=CorridorFundingMethod.objects.filter(is_active=True)
-                ),
-                Prefetch(
-                    'payout_methods',
-                    queryset=CorridorPayoutMethod.objects.filter(is_active=True)
-                )
-            ).select_related(
-                'source_country',
-                'destination_country'
-            ).get(id=corridor_id, is_active=True)
-        except Corridor.DoesNotExist:
-            return Response({
-                'success': False,
-                'error': 'Corridor not found or inactive.',
-            }, status=status.HTTP_404_NOT_FOUND)
-        
-        serializer = CorridorSerializer(corridor)
-        
-        return Response({
-            'success': True,
-            'data': serializer.data,
-        }, status=status.HTTP_200_OK)
-
-
-class CorridorPaymentMethodsView(APIView):
-    """Get payment methods for a specific corridor"""
+    Get all available funding methods for a country
+    (How the sender can pay)
+    """
     permission_classes = [IsAuthenticated]
     
     def get(self, request):
-        """
-        Get payment methods for source→destination corridor
+        source_code = request.query_params.get('country')
         
-        GET /api/routes/payment-methods/?source=CM&destination=CI
-        """
+        if not source_code:
+            # Get from user's country if available
+            try:
+                if hasattr(request.user, 'country') and request.user.country:
+                    source_code = request.user.country.iso_code
+                else:
+                    return Response({
+                        'success': False,
+                        'error': 'Please provide ?country=ISO_CODE parameter',
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            except:
+                return Response({
+                    'success': False,
+                    'error': 'Please provide ?country=ISO_CODE parameter',
+                }, status=status.HTTP_400_BAD_REQUEST)
+        
+        source_country = get_object_or_404(
+            Country,
+            iso_code=source_code.upper(),
+            is_active=True
+        )
+        
+        # Get payment methods suitable for funding
+        funding_methods = source_country.payment_methods.filter(
+            is_active=True
+        ).filter(
+            Q(type_category='funding') | Q(type_category='both')
+        ).order_by('-priority', 'method_type')
+        
+        serializer = PaymentMethodSerializer(funding_methods, many=True)
+        
+        return Response({
+            'success': True,
+            'country': CountrySerializer(source_country).data,
+            'funding_methods': serializer.data,
+            'count': funding_methods.count(),
+        })
+
+
+class PayoutMethodsView(APIView):
+    """
+    GET /api/routes/payout-methods/
+    
+    Get all available payout methods for a country
+    (How the receiver gets money)
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        destination_code = request.query_params.get('country')
+        
+        if not destination_code:
+            return Response({
+                'success': False,
+                'error': 'Please provide ?country=ISO_CODE parameter',
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        destination_country = get_object_or_404(
+            Country,
+            iso_code=destination_code.upper(),
+            is_active=True
+        )
+        
+        # Get payment methods suitable for payout
+        payout_methods = destination_country.payment_methods.filter(
+            is_active=True
+        ).filter(
+            Q(type_category='payout') | Q(type_category='both')
+        ).order_by('-priority', 'method_type')
+        
+        serializer = PaymentMethodSerializer(payout_methods, many=True)
+        
+        return Response({
+            'success': True,
+            'country': CountrySerializer(destination_country).data,
+            'payout_methods': serializer.data,
+            'count': payout_methods.count(),
+        })
+
+
+class TransferFlowView(APIView):
+    """
+    ✨ NEW: Complete transfer flow endpoint
+    
+    GET /api/routes/transfer-flow/?source=CM&destination=CI&funding_method=mtn_cm&payout_method=mtn_ci
+    
+    Returns:
+    - Source country funding methods
+    - Destination country payout methods
+    - Corridor info (fees, limits)
+    - Whether transfer is possible
+    """
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
         source_code = request.query_params.get('source')
         destination_code = request.query_params.get('destination')
+        funding_method_id = request.query_params.get('funding_method')
+        payout_method_id = request.query_params.get('payout_method')
         
+        # Validate required params
         if not source_code or not destination_code:
             return Response({
                 'success': False,
-                'error': 'Both source and destination country codes are required.',
+                'error': 'Both source and destination country codes required (?source=CM&destination=CI)',
             }, status=status.HTTP_400_BAD_REQUEST)
         
-        try:
-            corridor = Corridor.objects.prefetch_related(
-                Prefetch(
-                    'funding_methods',
-                    queryset=CorridorFundingMethod.objects.filter(is_active=True)
-                ),
-                Prefetch(
-                    'payout_methods',
-                    queryset=CorridorPayoutMethod.objects.filter(is_active=True)
-                )
-            ).get(
-                source_country__iso_code=source_code,
-                destination_country__iso_code=destination_code,
-                is_active=True
-            )
-        except Corridor.DoesNotExist:
-            return Response({
-                'success': False,
-                'error': f'No active corridor found from {source_code} to {destination_code}.',
-            }, status=status.HTTP_404_NOT_FOUND)
+        # Get countries
+        source_country = get_object_or_404(Country, iso_code=source_code.upper())
+        destination_country = get_object_or_404(Country, iso_code=destination_code.upper())
         
-        funding_serializer = FundingMethodSerializer(corridor.funding_methods.all(), many=True)
-        payout_serializer = PayoutMethodSerializer(corridor.payout_methods.all(), many=True)
+        # Check if corridor exists
+        corridor = Corridor.objects.filter(
+            source_country=source_country,
+            destination_country=destination_country,
+            is_active=True
+        ).first()
         
-        return Response({
+        # Get payment methods
+        funding_methods = source_country.payment_methods.filter(
+            is_active=True
+        ).filter(
+            Q(type_category='funding') | Q(type_category='both')
+        ).order_by('-priority')
+        
+        payout_methods = destination_country.payment_methods.filter(
+            is_active=True
+        ).filter(
+            Q(type_category='payout') | Q(type_category='both')
+        ).order_by('-priority')
+        
+        # If specific methods requested, validate them
+        if funding_method_id or payout_method_id:
+            if funding_method_id:
+                try:
+                    funding_method = funding_methods.get(id=funding_method_id)
+                except PaymentMethod.DoesNotExist:
+                    return Response({
+                        'success': False,
+                        'error': f'Funding method {funding_method_id} not available in {source_code}',
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            
+            if payout_method_id:
+                try:
+                    payout_method = payout_methods.get(id=payout_method_id)
+                except PaymentMethod.DoesNotExist:
+                    return Response({
+                        'success': False,
+                        'error': f'Payout method {payout_method_id} not available in {destination_code}',
+                    }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Build response
+        response_data = {
             'success': True,
-            'data': {
-                'corridor_id': corridor.id,
-                'source_country': corridor.source_country.iso_code,
-                'destination_country': corridor.destination_country.iso_code,
-                'funding_methods': funding_serializer.data,
-                'payout_methods': payout_serializer.data,
-            }
-        }, status=status.HTTP_200_OK)
+            'source_country': CountrySerializer(source_country).data,
+            'destination_country': CountrySerializer(destination_country).data,
+            'funding_methods': PaymentMethodSerializer(funding_methods, many=True).data,
+            'payout_methods': PaymentMethodSerializer(payout_methods, many=True).data,
+            'corridor': CorridorSerializer(corridor).data if corridor else None,
+            'available': bool(corridor),
+            'message': 'Transfer route available' if corridor else f'No active corridor from {source_code} to {destination_code}',
+        }
+        
+        return Response(response_data)
 
 
-class ValidateCorridorView(APIView):
-    """Validate if a corridor and payment methods are valid"""
+class AvailableDestinationsView(APIView):
+    """
+    ✨ NEW: Get all destinations from a source country
+    
+    GET /api/routes/available-destinations/?source=CM
+    
+    Returns all countries you can send to from source, with their payout methods
+    """
     permission_classes = [IsAuthenticated]
     
-    def post(self, request):
-        """
-        Validate corridor and payment methods before transfer
+    def get(self, request):
+        source_code = request.query_params.get('source')
         
-        POST /api/routes/validate/
-        {
-            "source_country": "CM",
-            "destination_country": "CI",
-            "funding_method_type": "mobile_money",
-            "funding_mobile_provider": "mtn_cm",
-            "payout_method_type": "mobile_money",
-            "payout_mobile_provider": "mtn_ci"
+        if not source_code:
+            try:
+                if hasattr(request.user, 'country') and request.user.country:
+                    source_code = request.user.country.iso_code
+                else:
+                    return Response({
+                        'success': False,
+                        'error': 'Please provide ?source=ISO_CODE parameter',
+                    }, status=status.HTTP_400_BAD_REQUEST)
+            except:
+                return Response({
+                    'success': False,
+                    'error': 'Please provide ?source=ISO_CODE parameter',
+                }, status=status.HTTP_400_BAD_REQUEST)
+        
+        source_country = get_object_or_404(Country, iso_code=source_code.upper())
+        
+        # Get all active corridors from source
+        corridors = Corridor.objects.filter(
+            source_country=source_country,
+            is_active=True
+        ).select_related('destination_country')
+        
+        destinations = []
+        flag_map = {
+            'CM': '🇨🇲', 'CI': '🇨🇮', 'SN': '🇸🇳', 'ML': '🇲🇱',
+            'BF': '🇧🇫', 'TG': '🇹🇬', 'BJ': '🇧🇯', 'NE': '🇳🇪',
+            'GH': '🇬🇭', 'NG': '🇳🇬', 'KE': '🇰🇪', 'UG': '🇺🇬',
         }
-        """
-        source_code = request.data.get('source_country')
-        destination_code = request.data.get('destination_country')
-        funding_type = request.data.get('funding_method_type')
-        funding_provider = request.data.get('funding_mobile_provider')
-        payout_type = request.data.get('payout_method_type')
-        payout_provider = request.data.get('payout_mobile_provider')
         
-        # Validate corridor exists
-        try:
-            corridor = Corridor.objects.get(
-                source_country__iso_code=source_code,
-                destination_country__iso_code=destination_code,
+        for corridor in corridors:
+            dest = corridor.destination_country
+            
+            # Get payout methods for destination
+            payout_methods = dest.payment_methods.filter(
                 is_active=True
-            )
-        except Corridor.DoesNotExist:
-            return Response({
-                'success': False,
-                'valid': False,
-                'error': f'No active corridor from {source_code} to {destination_code}.',
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Validate funding method
-        funding_valid = CorridorFundingMethod.objects.filter(
-            corridor=corridor,
-            method_type=funding_type,
-            is_active=True
-        )
-        
-        if funding_type == 'mobile_money' and funding_provider:
-            funding_valid = funding_valid.filter(mobile_provider=funding_provider)
-        
-        if not funding_valid.exists():
-            return Response({
-                'success': False,
-                'valid': False,
-                'error': 'Selected funding method is not available for this corridor.',
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Validate payout method
-        payout_valid = CorridorPayoutMethod.objects.filter(
-            corridor=corridor,
-            method_type=payout_type,
-            is_active=True
-        )
-        
-        if payout_type == 'mobile_money' and payout_provider:
-            payout_valid = payout_valid.filter(mobile_provider=payout_provider)
-        
-        if not payout_valid.exists():
-            return Response({
-                'success': False,
-                'valid': False,
-                'error': 'Selected payout method is not available for this corridor.',
-            }, status=status.HTTP_400_BAD_REQUEST)
+            ).filter(
+                Q(type_category='payout') | Q(type_category='both')
+            ).order_by('-priority')
+            
+            destinations.append({
+                'country_code': dest.iso_code,
+                'country_name': dest.name,
+                'country_flag': flag_map.get(dest.iso_code, '🌍'),
+                'corridor_id': corridor.id,
+                'fees': {
+                    'fixed': str(corridor.fixed_fee),
+                    'percentage': str(corridor.percentage_fee),
+                },
+                'limits': {
+                    'min': str(corridor.min_amount),
+                    'max': str(corridor.max_amount),
+                },
+                'payout_methods': PaymentMethodSerializer(payout_methods, many=True).data,
+            })
         
         return Response({
             'success': True,
-            'valid': True,
-            'message': 'Corridor and payment methods are valid.',
-            'data': {
-                'corridor_id': corridor.id,
-            }
-        }, status=status.HTTP_200_OK)
+            'source_country': CountrySerializer(source_country).data,
+            'destinations': sorted(destinations, key=lambda x: x['country_name']),
+            'total_destinations': len(destinations),
+        })

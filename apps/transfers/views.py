@@ -19,7 +19,7 @@ from .serializers import (
 )
 from apps.integrations.awdpay import AwdPayClient
 from apps.core.utils import get_client_ip  # you likely already have something like this
-
+from decimal import Decimal
 
 class TransferThrottle(UserRateThrottle):
     scope = 'transaction'  # matches your DRF throttle rates
@@ -122,14 +122,40 @@ class CreateTransferView(APIView):
             status=status.HTTP_201_CREATED,
         )
 
-    def _calc_fee(self, amount):
-        # example: 1% fee, min 50, max 500
-        fee = amount * 0.01
-        if fee < 50:
-            fee = 50
-        if fee > 500:
-            fee = 500
-        return fee
+    def _calc_fee(self, amount, currency='XAF'):
+
+        # fee_rate = Decimal('0.01')  # 1%
+        # min_fee = Decimal('50')
+        # max_fee = Decimal('500')
+        
+        # # Calculate fee
+        # fee = amount * fee_rate
+        
+        # # Apply min/max bounds
+        # if fee < min_fee:
+        #     fee = min_fee
+        # elif fee > max_fee:
+        #     fee = max_fee
+        
+        # return fee
+
+        amount = Decimal(str(amount))  # Ensure Decimal
+        
+        # Fee tiers
+        if amount <= Decimal('10000'):
+            return Decimal('50')
+        
+        elif amount <= Decimal('50000'):
+            fee = amount * Decimal('0.01')  # 1%
+            return max(Decimal('100'), min(fee, Decimal('500')))
+        
+        elif amount <= Decimal('200000'):
+            fee = amount * Decimal('0.008')  # 0.8%
+            return max(Decimal('500'), min(fee, Decimal('1500')))
+        
+        else:  # > 200,000
+            fee = amount * Decimal('0.005')  # 0.5%
+            return max(Decimal('1500'), min(fee, Decimal('5000')))
         
 
 class TransferHistoryView(APIView):

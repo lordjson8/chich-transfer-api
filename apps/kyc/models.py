@@ -27,6 +27,7 @@ class KYCDocumentType(models.TextChoices):
 
 class KYCVerificationStatus(models.TextChoices):
     """KYC verification status"""
+    NOT_SUBMITTED = 'not_submitted', 'Not Submitted'
     PENDING = 'pending', 'Pending'
     APPROVED = 'approved', 'Approved'
     REJECTED = 'rejected', 'Rejected'

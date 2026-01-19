@@ -245,30 +245,30 @@ SIMPLE_JWT = {
 # ============================================================================
 # REDIS & CACHING
 # ============================================================================
-REDIS_HOST = config('REDIS_HOST', default='localhost')
-REDIS_PORT = config('REDIS_PORT', default=6379, cast=int)
-REDIS_DB = config('REDIS_DB', default=0, cast=int)
-REDIS_URL = f'redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}'
+# REDIS_HOST = config('REDIS_HOST', default='localhost')
+# REDIS_PORT = config('REDIS_PORT', default=6379, cast=int)
+# REDIS_DB = config('REDIS_DB', default=0, cast=int)
+# REDIS_URL = f'redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}'
 
-CACHES = {
-    'default': {
-        'BACKEND': 'django_redis.cache.RedisCache',
-        'LOCATION': REDIS_URL,
-        'OPTIONS': {
-            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-            'PASSWORD': config('REDIS_PASSWORD', default=''),
-            'SOCKET_CONNECT_TIMEOUT': 5,
-            'SOCKET_TIMEOUT': 5,
-            'COMPRESSOR': 'django_redis.compressors.zlib.ZlibCompressor',
-            'CONNECTION_POOL_KWARGS': {
-                'max_connections': 50,
-                'retry_on_timeout': True,
-            },
-        },
-        'KEY_PREFIX': 'moneytransfer',
-        'TIMEOUT': 300,  # 5 minutes default
-    }
-}
+# CACHES = {
+#     'default': {
+#         'BACKEND': 'django_redis.cache.RedisCache',
+#         'LOCATION': REDIS_URL,
+#         'OPTIONS': {
+#             'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+#             'PASSWORD': config('REDIS_PASSWORD', default=''),
+#             'SOCKET_CONNECT_TIMEOUT': 5,
+#             'SOCKET_TIMEOUT': 5,
+#             'COMPRESSOR': 'django_redis.compressors.zlib.ZlibCompressor',
+#             'CONNECTION_POOL_KWARGS': {
+#                 'max_connections': 50,
+#                 'retry_on_timeout': True,
+#             },
+#         },
+#         'KEY_PREFIX': 'moneytransfer',
+#         'TIMEOUT': 300,  # 5 minutes default
+#     }
+# }
 
 # Session configuration
 SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
@@ -277,17 +277,17 @@ SESSION_CACHE_ALIAS = 'default'
 # ============================================================================
 # CELERY CONFIGURATION
 # ============================================================================
-CELERY_BROKER_URL = REDIS_URL
-CELERY_RESULT_BACKEND = REDIS_URL
-CELERY_ACCEPT_CONTENT = ['json']
-CELERY_TASK_SERIALIZER = 'json'
-CELERY_RESULT_SERIALIZER = 'json'
-CELERY_TIMEZONE = TIME_ZONE
-CELERY_TASK_TRACK_STARTED = True
-CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
-CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60  # 25 minutes
-CELERY_WORKER_PREFETCH_MULTIPLIER = 4
-CELERY_WORKER_MAX_TASKS_PER_CHILD = 1000
+# CELERY_BROKER_URL = REDIS_URL
+# CELERY_RESULT_BACKEND = REDIS_URL
+# CELERY_ACCEPT_CONTENT = ['json']
+# CELERY_TASK_SERIALIZER = 'json'
+# CELERY_RESULT_SERIALIZER = 'json'
+# CELERY_TIMEZONE = TIME_ZONE
+# CELERY_TASK_TRACK_STARTED = True
+# CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
+# CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60  # 25 minutes
+# CELERY_WORKER_PREFETCH_MULTIPLIER = 4
+# CELERY_WORKER_MAX_TASKS_PER_CHILD = 1000
 
 # ============================================================================
 # CORS SETTINGS

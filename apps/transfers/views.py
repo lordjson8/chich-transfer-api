@@ -27,7 +27,7 @@ class TransferThrottle(UserRateThrottle):
 
 class CreateTransferView(APIView):
     permission_classes = [IsAuthenticated]
-    throttle_classes = [TransferThrottle]
+    # throttle_classes = [TransferThrottle]
 
     @db_transaction.atomic
     def post(self, request):

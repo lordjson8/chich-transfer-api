@@ -911,17 +911,17 @@ class MeView(generics.RetrieveAPIView):
         instance = self.get_object()
         serializer = self.get_serializer(instance)
         
-        # If user has no KYC profile, create a default one
-        if not hasattr(instance, 'kyc_profile'):
-            from apps.kyc.models import KYCProfile
-            KYCProfile.objects.create(
-                user=instance,
-                level='LEVEL_0',
-                status='pending'
-            )
-            # Re-fetch with KYC profile
-            instance = self.get_object()
-            serializer = self.get_serializer(instance)
+        # # If user has no KYC profile, create a default one
+        # if not hasattr(instance, 'kyc_profile'):
+        #     from apps.kyc.models import KYCProfile
+        #     KYCProfile.objects.create(
+        #         user=instance,
+        #         kyc_level='LEVEL_0',
+        #         verification_status='not_submitted'
+        #     )
+        #     # Re-fetch with KYC profile
+        #     instance = self.get_object()
+        #     serializer = self.get_serializer(instance)
         
         return Response(serializer.data)
 

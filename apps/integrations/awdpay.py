@@ -28,13 +28,18 @@ class AwdPayClient:
             'recipient_name': recipient_name,
             'description': description or '',
         }
-        resp = requests.post(
-            f"{self.base_url}/transfers/",
-            json=payload,
-            headers=self._headers(),
-            timeout=10,
-        )
-        data = resp.json()
+        try:
+
+            resp = requests.post(
+                f"{self.base_url}/transfers/",
+                json=payload,
+                headers=self._headers(),
+                timeout=10,
+            )
+            data = resp.json()
+        except requests.RequestException as e:
+            return {'success': False, 'error': str(e)}
+        
         if resp.status_code not in (200, 201):
             return {'success': False, 'error': data.get('error', 'Transfer failed')}
         return {'success': True, 'provider_id': data.get('id'), 'raw': data}

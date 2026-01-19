@@ -10,4 +10,4 @@ newrelic==9.5.0
 django-prometheus==2.3.1
 
 # Performance
-django-cachalot==2.6.1
+# django-cachalot==2.6.1

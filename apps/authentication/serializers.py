@@ -20,16 +20,20 @@ class UserSerializer(serializers.ModelSerializer):
     kyc_status = serializers.SerializerMethodField()
     kyc_level = serializers.SerializerMethodField()
     transaction_limits = serializers.SerializerMethodField()
+    has_kyc_profile = serializers.SerializerMethodField()
+    national_number = PhoneNumberField(source='phone.national_number', read_only=True)
+    country_name = serializers.CharField(source='phone.country_name', read_only=True)
     
     class Meta:
         model = User
         fields = [
-            'id', 'email', 'phone', 'full_name', 'country',
+            'id', 'email', 'phone','national_number','country_name', 'full_name', 'country',
             'email_verified', 'phone_verified',
             'kyc_status',
-            'kyc_level', 
+            'kyc_level',
+            'has_kyc_profile',
             'two_factor_enabled', 'is_verified',
-            'can_transfer', 
+            # 'can_transfer', 
             'transaction_limits',
             'created_at'
         ]
@@ -48,6 +52,12 @@ class UserSerializer(serializers.ModelSerializer):
             return obj.kyc_profile.verification_status
         except KYCProfile.DoesNotExist:
             return KYCVerificationStatus.NOT_SUBMITTED
+        
+    def get_has_kyc_profile(self, obj):
+        try:
+            return bool(obj.kyc_profile)
+        except KYCProfile.DoesNotExist:
+            return False
 
     def get_kyc_level(self, obj):
         """

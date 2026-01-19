@@ -57,15 +57,15 @@ class KYCProfile(models.Model):
             # ('other', 'Other'),
         ]
     )
-    nationality = models.CharField(max_length=100)
+    nationality = models.CharField(max_length=100, blank=True)
     
     # Address Information
     address_line_1 = models.CharField(max_length=255)
     address_line_2 = models.CharField(max_length=255, blank=True)
     city = models.CharField(max_length=100)
     state_province = models.CharField(max_length=100)
-    postal_code = models.CharField(max_length=20)
-    country = models.CharField(max_length=100)
+    postal_code = models.CharField(max_length=20, blank=True)
+    country = models.CharField(max_length=100, blank=True)
     
     # Verification Status
     kyc_level = models.CharField(
@@ -76,7 +76,7 @@ class KYCProfile(models.Model):
     verification_status = models.CharField(
         max_length=20,
         choices=KYCVerificationStatus.choices,
-        default=KYCVerificationStatus.PENDING
+        default=KYCVerificationStatus.NOT_SUBMITTED
     )
     
     # Verification Timestamps

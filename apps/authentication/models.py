@@ -157,10 +157,10 @@ class User(AbstractUser):
         """Check if both email and phone are verified"""
         return self.email_verified and self.phone_verified
     
-    @property
-    def can_transfer(self):
-        """Check if user can make transfers"""
-        return self.is_verified and self.kyc_status == 'approved' and self.is_active
+    # @property
+    # def can_transfer(self):
+    #     """Check if user can make transfers"""
+    #     return self.is_verified and self.kyc_status == 'approved' and self.is_active
     
     def get_remaining_daily_limit(self):
         """Calculate remaining daily transfer limit"""

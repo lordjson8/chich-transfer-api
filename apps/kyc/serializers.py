@@ -94,7 +94,6 @@ class KYCDocumentSerializer(serializers.ModelSerializer):
 
 class KYCProfileSerializer(serializers.ModelSerializer):
     """Serialize KYC profile with document requirements"""
-    
     kyc_level_display = serializers.CharField(
         source='get_kyc_level_display',
         read_only=True

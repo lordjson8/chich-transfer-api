@@ -87,6 +87,7 @@ class KYCProfileView(APIView):
         """
         serializer = CreateKYCProfileSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        user = request.user
         
         try:
             kyc_profile = request.user.kyc_profile
@@ -100,14 +101,24 @@ class KYCProfileView(APIView):
             # Create new profile
             kyc_profile = KYCProfile.objects.create(
                 user=request.user,
+                # verification_status='not_submitted',
                 **serializer.validated_data
             )
             action = 'submitted'
         
         # Mark as submitted
         kyc_profile.submitted_at = timezone.now()
-        kyc_profile.verification_status = 'under_review'
-        kyc_profile.save(update_fields=['submitted_at', 'verification_status'])
+        try:
+            kyc_docs = KYCDocument.objects.filter(kyc_profile=kyc_profile)
+            # print(kyc_docs)
+            if kyc_docs.exists():  # Just to check if any document exists
+                kyc_profile.verification_status = 'under_review'
+                kyc_profile.save(update_fields=['submitted_at', 'verification_status'])
+
+        except KYCDocument.DoesNotExist:
+            kyc_profile.verification_status = 'not_submitted'
+            kyc_profile.save(update_fields=['submitted_at', 'verification_status'])
+        
         
         # Log action
         KYCVerificationLog.objects.create(
@@ -120,6 +131,9 @@ class KYCProfileView(APIView):
         
         response_serializer = KYCProfileSerializer(kyc_profile)
         
+        user.full_name = f"{kyc_profile.first_name} {kyc_profile.last_name}"
+        user.save(update_fields=['full_name'])
+
         return Response({
             'success': True,
             'message': f'KYC profile {action} for review',
@@ -218,6 +232,9 @@ class KYCDocumentUploadView(APIView):
                 existing_doc.delete()
         
         document = serializer.save(kyc_profile=kyc_profile)
+        
+        kyc_profile.verification_status = 'under_review'
+        kyc_profile.save(update_fields=['verification_status'])
         
         # Log action
         if KYCDocument.is_selfie(document_type):

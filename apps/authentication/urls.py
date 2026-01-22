@@ -35,6 +35,16 @@ urlpatterns = [
 
      # Password Management
     path('password/request-reset/', views.RequestPasswordResetView.as_view(), name='request-password-reset'),
+    path(
+        "password/request-reset-email/",
+        views.RequestPasswordViewNew.as_view(),
+        name="password-reset-request-email",
+    ),
+    path(
+        "reset-password/",
+        views.ResetPasswordTemplateView.as_view(),
+        name="password-reset-html",
+    ),
     path('password/verify-token/', views.VerifyPasswordResetTokenView.as_view(), name='verify-reset-token'),
     path('password/reset/', views.ResetPasswordView.as_view(), name='reset-password'),
     path('password/change/', views.ChangePasswordView.as_view(), name='change-password'),

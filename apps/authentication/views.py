@@ -1,6 +1,8 @@
 """
 Authentication API Views
 """
+from django.shortcuts import render, redirect
+from django.views.generic import TemplateView
 from rest_framework import status, generics
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -13,6 +15,13 @@ from datetime import timedelta
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExample
 from drf_spectacular.types import OpenApiTypes
 from .models import User, UserDevice, OTPVerification, BiometricChallenge,PasswordResetToken
+from django.views import View
+from django.contrib import messages
+from django.core.exceptions import ObjectDoesNotExist
+from django_ratelimit.decorators import ratelimit
+from .forms import ResetPasswordForm
+from django.contrib.auth.hashers import make_password
+
 from .serializers import (
     UserSerializer, UserRegistrationSerializer, LoginSerializer,
     OTPVerificationSerializer, ResendOTPSerializer,
@@ -841,6 +850,139 @@ class ResetPasswordView(APIView):
             }
         }, status=status.HTTP_200_OK)
 
+
+from django.urls import reverse
+
+
+
+class RequestPasswordViewNew(APIView):
+    """
+    Request password reset link via email (HTML reset flow).
+    """
+    permission_classes = [AllowAny]
+    # throttle_classes = [PasswordResetThrottle]
+
+    def post(self, request):
+        serializer = RequestPasswordResetSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        email = serializer.validated_data["email"]
+
+        try:
+            user = User.objects.get(email=email)
+            ip_address = get_client_ip(request)
+
+            reset_token = PasswordResetToken.create_token(
+                user=user,
+                ip_address=ip_address,
+                valid_for_hours=settings.PASSWORD_RESET_TOKEN_EXPIRY_HOURS,
+            )
+
+            reset_path = reverse("authentication:password-reset-html")
+            reset_link = request.build_absolute_uri(
+                f"{reset_path}?token={reset_token.token}"
+            )
+
+            send_reset_password_email(
+                user=user,
+                reset_link=reset_link,
+            )
+
+            logger.info(
+                "Password reset requested",
+                extra={
+                    "user_id": user.id,
+                    "ip_address": ip_address,
+                },
+            )
+
+        except User.DoesNotExist:
+            # SECURITY: never reveal account existence
+            pass
+
+        return Response(
+            {
+                "success": True,
+                "message": (
+                    "If an account exists with this email, "
+                    "you will receive a password reset link."
+                ),
+                "data": {},
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+
+class ResetPasswordTemplateView(View):
+    """Handles password reset via HTML form with token verification"""
+
+    # @ratelimit(key='ip', rate='5/m', block=True)  # production throttle: 5 requests per minute per IP
+    def get(self, request):
+        token = request.GET.get('token')
+        if not token:
+            return render(request, 'auth/reset_password_error.html', {
+                'error': 'Invalid or missing token.'
+            }, status=400)
+
+        try:
+            reset_token = PasswordResetToken.objects.get(token=token, is_used=False)
+            if reset_token.expires_at < timezone.now():
+                raise ObjectDoesNotExist
+        except ObjectDoesNotExist:
+            return render(request, 'auth/reset_password_error.html', {
+                'error': 'This password reset link has expired or is invalid.'
+            }, status=400)
+
+        # Render form with token and email pre-filled
+        form = ResetPasswordForm()
+        return render(request, 'auth/reset_password.html', {
+            'form': form,
+            'token': token,
+            'email': reset_token.user.email
+        })
+
+    # @ratelimit(key='ip', rate='5/m', block=True)
+    def post(self, request):
+        form = ResetPasswordForm(request.POST)
+        token = request.POST.get('token')
+
+        if not token:
+            return render(request, 'auth/reset_password_error.html', {
+                'error': 'Missing token.'
+            }, status=400)
+
+        try:
+            reset_token = PasswordResetToken.objects.get(token=token, is_used=False)
+            if reset_token.expires_at < timezone.now():
+                raise ObjectDoesNotExist
+        except ObjectDoesNotExist:
+            return render(request, 'auth/reset_password_error.html', {
+                'error': 'This password reset link has expired or is invalid.'
+            }, status=400)
+
+        if form.is_valid():
+            password = form.cleaned_data['password']
+            reset_token.user.password = make_password(password)
+            reset_token.user.save()
+
+            # Invalidate token immediately
+            reset_token.is_used = True
+            reset_token.used_at = timezone.now()
+            reset_token.save()
+
+            ip_address = get_client_ip(request)
+            logger.info(f"Password reset for user {reset_token.user.id} from IP {ip_address}")
+
+            messages.success(request, "Your password has been reset successfully. Please login.")
+            return render(request, 'auth/reset_password_success.html')
+        else:
+            # Form invalid
+            return render(request, 'auth/reset_password.html', {
+                'form': form,
+                'token': token,
+                'email': reset_token.user.email
+            })
 
 class ChangePasswordView(APIView):
     """Change password (authenticated user)"""

@@ -12,7 +12,9 @@ from django.contrib.auth.hashers import make_password, check_password
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.exceptions import InvalidSignature
-
+from django.core.mail import EmailMultiAlternatives
+from django.template.loader import render_to_string
+import logging
 
 # ============================================================================
 # OTP FUNCTIONS
@@ -65,32 +67,32 @@ def create_otp_verification(user, otp_type, sent_to, ip_address=None):
     
     return otp_verification, otp_code
 
-def send_reset_password_email(user, reset_token,request):
-    """Send password reset email"""
+# def send_reset_password_email(user, reset_link):
+#     """Send password reset email"""
     
-    subject = "Reset Your Password"
-    message = f"""
-    Hi {user.get_full_name() or user.email},
+#     subject = "Reset Your Password"
+#     message = f"""
+#     Hi {user.get_full_name() or user.email},
     
-    We received a request to reset your password. Click the link below to set a new password:
+#     We received a request to reset your password. Click the link below to set a new password:
     
-    {reset_token}
+#     {reset_link}
     
-    This link will expire in {settings.PASSWORD_RESET_TOKEN_EXPIRY_HOURS} hours.
+#     This link will expire in {settings.PASSWORD_RESET_TOKEN_EXPIRY_HOURS} hours.
     
-    If you didn't request a password reset, please ignore this email.
+#     If you didn't request a password reset, please ignore this email.
     
-    Best regards,
-    Money Transfer Team
-    """
+#     Best regards,
+#     Money Transfer Team
+#     """
     
-    send_mail(
-        subject=subject,
-        message=message,
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        recipient_list=[user.email],
-        fail_silently=False,
-    )
+#     send_mail(
+#         subject=subject,
+#         message=message,
+#         from_email=settings.DEFAULT_FROM_EMAIL,
+#         recipient_list=[user.email],
+#         fail_silently=False,
+#     )
 
 def send_otp_email(email, otp_code, otp_type='verification'):
     # print(f"Sending OTP {otp_code} to email {email} for {otp_type}")
@@ -140,6 +142,62 @@ def send_otp_sms(phone, otp_code):
     # send_sms(phone, message)
     
     # print(f"SMS to {phone}: {message}")  # Development only
+
+def send_reset_password_email(user, reset_link):
+    """
+    Send password reset email with secure reset link.
+
+    Args:
+        user: User instance
+        reset_link: Absolute URL to password reset page
+    """
+
+    subject = "Reset Your Password"
+    from_email = settings.DEFAULT_FROM_EMAIL
+    recipient_list = [user.email]
+
+    context = {
+        "user": user,
+        "email": user.email,
+        "reset_link": reset_link,
+        "expiry_hours": settings.PASSWORD_RESET_TOKEN_EXPIRY_HOURS,
+        "app_name": getattr(settings, "PROJECT_NAME", "Money Transfer"),
+        "support_email": getattr(settings, "SUPPORT_EMAIL", from_email),
+    }
+
+    # HTML version (primary)
+    html_content = render_to_string(
+        "emails/password_reset_email.html",
+        context,
+    )
+
+    # Plain-text fallback
+    text_content = f"""
+Hello {user.get_full_name() or user.email},
+
+We received a request to reset your password.
+
+Use the link below to set a new password:
+{reset_link}
+
+This link will expire in {settings.PASSWORD_RESET_TOKEN_EXPIRY_HOURS} hours.
+
+If you did not request this, please ignore this email.
+
+Regards,
+{context["app_name"]}
+"""
+
+    email = EmailMultiAlternatives(
+        subject=subject,
+        body=text_content,
+        from_email=from_email,
+        to=recipient_list,
+    )
+
+    email.attach_alternative(html_content, "text/html")
+    email.send(fail_silently=False)
+
 
 
 # ============================================================================

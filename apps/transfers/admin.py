@@ -13,14 +13,20 @@ class TransferAdmin(admin.ModelAdmin):
         'status_colored',
         'amount',
         'currency',
-        'recipient_name',
+        'sender_phone',
         'recipient_phone',
+        'funding_mobile_provider',
+        'payout_mobile_provider',
         'created_at',
     ]
-    list_filter = ['status', 'currency', 'provider', 'created_at']
+    list_filter = ['status', 'currency', 'funding_mobile_provider', 'payout_mobile_provider', 'created_at']
     search_fields = [
         'reference',
+        'deposit_reference',
+        'withdrawal_reference',
         'user__email',
+        'sender_phone',
+        'sender_name',
         'recipient_name',
         'recipient_phone',
         'provider_id',
@@ -29,12 +35,22 @@ class TransferAdmin(admin.ModelAdmin):
         'id',
         'reference',
         'provider_id',
+        'deposit_reference',
+        'deposit_status',
+        'deposit_gateway',
+        'deposit_initiated_at',
+        'deposit_confirmed_at',
+        'withdrawal_reference',
+        'withdrawal_status',
+        'withdrawal_gateway',
+        'withdrawal_initiated_at',
+        'withdrawal_confirmed_at',
         'created_at',
         'updated_at',
         'completed_at',
     ]
     ordering = ['-created_at']
-    
+
     fieldsets = (
         ('Transfer Info', {
             'fields': (
@@ -45,12 +61,12 @@ class TransferAdmin(admin.ModelAdmin):
                 'corridor',
             )
         }),
-        ('Amount Details', {
+        ('Sender', {
             'fields': (
-                'amount',
-                'currency',
-                'service_fee',
-                'total_amount',
+                'sender_name',
+                'sender_phone',
+                'sender_email',
+                'funding_mobile_provider',
             )
         }),
         ('Recipient', {
@@ -58,16 +74,42 @@ class TransferAdmin(admin.ModelAdmin):
                 'recipient_name',
                 'recipient_phone',
                 'recipient_email',
-            )
-        }),
-        ('Payment Methods', {
-            'fields': (
-                'funding_method_type',
-                'funding_mobile_provider',
-                'funding_card_scheme',
-                'payout_method_type',
                 'payout_mobile_provider',
             )
+        }),
+        ('Source Amount', {
+            'fields': (
+                'amount',
+                'currency',
+                'service_fee',
+                'total_amount',
+            )
+        }),
+        ('Destination Amount', {
+            'fields': (
+                'destination_amount',
+                'destination_currency',
+            )
+        }),
+        ('Deposit Phase (AWDPay)', {
+            'fields': (
+                'deposit_reference',
+                'deposit_status',
+                'deposit_gateway',
+                'deposit_initiated_at',
+                'deposit_confirmed_at',
+            ),
+            'classes': ('collapse',),
+        }),
+        ('Withdrawal Phase (AWDPay)', {
+            'fields': (
+                'withdrawal_reference',
+                'withdrawal_status',
+                'withdrawal_gateway',
+                'withdrawal_initiated_at',
+                'withdrawal_confirmed_at',
+            ),
+            'classes': ('collapse',),
         }),
         ('Provider', {
             'fields': (
@@ -91,10 +133,14 @@ class TransferAdmin(admin.ModelAdmin):
             )
         }),
     )
-    
+
     def status_colored(self, obj):
         colors = {
             'pending': 'orange',
+            'deposit_pending': '#2196F3',
+            'deposit_confirmed': '#4CAF50',
+            'deposit_failed': '#f44336',
+            'withdrawal_pending': '#FF9800',
             'processing': 'blue',
             'completed': 'green',
             'failed': 'red',
@@ -142,6 +188,8 @@ class TransferAuditLogAdmin(admin.ModelAdmin):
     list_filter = ['event', 'created_at']
     search_fields = [
         'transfer__reference',
+        'transfer__deposit_reference',
+        'transfer__withdrawal_reference',
         'transfer__user__email',
     ]
     readonly_fields = [
@@ -152,16 +200,14 @@ class TransferAuditLogAdmin(admin.ModelAdmin):
         'created_at',
     ]
     ordering = ['-created_at']
-    
+
     def transfer_reference(self, obj):
         return obj.transfer.reference
     transfer_reference.short_description = 'Transfer'
     transfer_reference.admin_order_field = 'transfer__reference'
-    
+
     def has_add_permission(self, request):
-        """Prevent manual creation"""
         return False
-    
+
     def has_delete_permission(self, request, obj=None):
-        """Prevent deletion for audit purposes"""
         return False

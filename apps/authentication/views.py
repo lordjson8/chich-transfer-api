@@ -762,9 +762,9 @@ class RequestPasswordResetView(APIView):
 
             # path = reverse('verify-res', kwargs={'pk': 42})
             # Send email with reset link
-            reset_link = f"{request.build_absolute_uri('/')}/reset-password?token={reset_token.token}"
+            reset_link = f"{request.build_absolute_uri('/')}api/auth/reset-password?token={reset_token.token}"
             
-            send_reset_password_email(user, reset_link, request)
+            send_reset_password_email(user, reset_link)
             
             logger.info(f"Password reset requested for user: {user.id} from IP: {ip_address}")
             

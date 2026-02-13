@@ -4,12 +4,16 @@ import re
 
 class ResetPasswordForm(forms.Form):
     password = forms.CharField(
-        widget=forms.PasswordInput(attrs={'placeholder': 'New Password'}),
-        min_length=8
+        widget=forms.PasswordInput(attrs={
+            'class': 'input-field',
+            'placeholder': 'Enter your new password'
+        })
     )
     password_confirm = forms.CharField(
-        widget=forms.PasswordInput(attrs={'placeholder': 'Confirm Password'}),
-        min_length=8
+        widget=forms.PasswordInput(attrs={
+            'class': 'input-field',
+            'placeholder': 'Confirm your new password'
+        })
     )
 
     def clean(self):

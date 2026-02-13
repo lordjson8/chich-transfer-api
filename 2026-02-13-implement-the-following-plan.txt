@@ -1,0 +1,2615 @@
+
+╭─── Claude Code v2.1.39 ──────────────────────────────────────────────────────╮
+│                                                    │ Tips for getting        │
+│                Welcome back AWDDEV!                │ started                 │
+│                                                    │ Run /init to create a … │
+│                       ▐▛███▜▌                      │ ─────────────────────── │
+│                      ▝▜█████▛▘                     │ Recent activity         │
+│                        ▘▘ ▝▝                       │ No recent activity      │
+│                                                    │                         │
+│   Opus 4.6 · Claude Max · developer@awdpay.com's   │                         │
+│   Organization                                     │                         │
+│    ~/…/projects/chic_transfer/chic-transfer-api    │                         │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ Plan to implement                                                            │
+│                                                                              │
+│ Chic Transfer API - AWDPay Integration Rewrite Plan                          │
+│                                                                              │
+│ Context                                                                      │
+│                                                                              │
+│ The Chic Transfer API backend is meant to transfer money between mobile      │
+│ money providers across African countries (e.g., MTN Cameroon -> Wave Cote    │
+│ d'Ivoire). It must use the AWDPay API to:                                    │
+│ 1. Deposit (collect) money from the sender's mobile money account            │
+│ 2. Withdraw (payout) money to the receiver's mobile money account            │
+│                                                                              │
+│ The current implementation is broken because:                                │
+│ - The AWDPay client calls fictional endpoints that don't exist               │
+│ - Authentication uses a static API key instead of OAuth2 (Keycloak           │
+│ client_credentials)                                                          │
+│ - The Transfer model only tracks a single operation, but the real flow is a  │
+│ two-phase deposit+withdrawal                                                 │
+│ - No gateway name mapping between internal provider codes and AWDPay gateway │
+│  names                                                                       │
+│ - No callback endpoints for AWDPay to notify our server of payment results   │
+│                                                                              │
+│ Transfer State Machine                                                       │
+│                                                                              │
+│ PENDING                                                                      │
+│   |                                                                          │
+│   v  (initiate_deposit succeeds)                                             │
+│ DEPOSIT_PENDING  (sender gets USSD prompt on phone)                          │
+│   |                                                                          │
+│   +-- deposit callback: completed --> DEPOSIT_CONFIRMED                      │
+│   |     |                                                                    │
+│   |     v  (initiate_withdrawal auto-triggered)                              │
+│   |   WITHDRAWAL_PENDING  (payout to receiver initiated)                     │
+│   |     |                                                                    │
+│   |     +-- withdrawal callback: completed --> COMPLETED                     │
+│   |     +-- withdrawal callback: failed -----> FAILED                        │
+│   |                                                                          │
+│   +-- deposit callback: failed -------> DEPOSIT_FAILED                       │
+│   |                                                                          │
+│   v  (initiate_deposit fails immediately)                                    │
+│ FAILED                                                                       │
+│                                                                              │
+│ Implementation Steps (9 steps, in dependency order)                          │
+│                                                                              │
+│ Step 1: Update Settings                                                      │
+│                                                                              │
+│ File: config/settings/base.py                                                │
+│                                                                              │
+│ Replace current AWDPAY_* settings (lines 362-365) with:                      │
+│ - AWDPAY_BASE_URL - AWDPay API server (e.g., https://api.awdpay.com)         │
+│ - AWDPAY_API_VERSION - API path prefix (api/v2)                              │
+│ - AWDPAY_KEYCLOAK_BASE_URL - Keycloak auth server                            │
+│ - AWDPAY_KEYCLOAK_REALM - Keycloak realm (awdpay-marchand)                   │
+│ - AWDPAY_KEYCLOAK_CLIENT_ID - Merchant client ID                             │
+│ - AWDPAY_KEYCLOAK_CLIENT_SECRET - Merchant client secret                     │
+│ - AWDPAY_CALLBACK_BASE_URL - Our public server URL for AWDPay to call back   │
+│                                                                              │
+│ Also update .env with actual values.                                         │
+│                                                                              │
+│ Step 2: Create Gateway Mapping Module (new file)                             │
+│                                                                              │
+│ File: apps/integrations/gateway_mapping.py                                   │
+│                                                                              │
+│ Maps internal MobileMoneyProvider codes (e.g., mtn_cm, wave_ci) to AWDPay    │
+│ gateway names (e.g., mtn, wave-ci) with their associated country ISO code    │
+│ and currency.                                                                │
+│                                                                              │
+│ Step 3: Rewrite AWDPay Client                                                │
+│                                                                              │
+│ File: apps/integrations/awdpay.py (full rewrite)                             │
+│                                                                              │
+│ - OAuth2 token management via Keycloak client_credentials grant              │
+│ - In-memory token caching with auto-refresh 60s before expiry                │
+│ - Methods:                                                                   │
+│   - initiate_deposit() -> POST /api/v2/classic/deposit/initiate              │
+│   - initiate_withdrawal() -> POST /api/v2/withdraw/initiate                  │
+│   - get_deposit_status() -> GET /api/v2/deposit/deposits/{ref}               │
+│   - get_withdrawal_status() -> GET /api/v2/withdraw/withdrawals/{ref}        │
+│   - list_deposit_gateways() -> GET /public/gateways/deposit/list             │
+│   - list_withdrawal_gateways() -> GET /api/v2/withdraw/list                  │
+│   - get_wallet_balance() -> GET /api/v2/wallet/balance                       │
+│                                                                              │
+│ Step 4: Update Transfer Models                                               │
+│                                                                              │
+│ File: apps/transfers/models.py                                               │
+│                                                                              │
+│ - Add new TransferStatus choices: DEPOSIT_PENDING, DEPOSIT_CONFIRMED,        │
+│ DEPOSIT_FAILED, WITHDRAWAL_PENDING                                           │
+│ - Add XOF to Currency choices                                                │
+│ - New Transfer fields:                                                       │
+│   - Sender info: sender_phone, sender_name, sender_email                     │
+│   - Funding/payout method: funding_mobile_provider, payout_mobile_provider   │
+│   - Corridor FK                                                              │
+│   - Destination: destination_amount, destination_currency                    │
+│   - AWDPay two-phase: deposit_reference, deposit_status, deposit_gateway,    │
+│ deposit_initiated_at, deposit_confirmed_at                                   │
+│   - AWDPay two-phase: withdrawal_reference, withdrawal_status,               │
+│ withdrawal_gateway, withdrawal_initiated_at, withdrawal_confirmed_at         │
+│ - New helper methods: mark_deposit_pending(), mark_deposit_confirmed(),      │
+│ mark_deposit_failed(), mark_withdrawal_pending(), updated mark_completed()   │
+│ - Run makemigrations + migrate                                               │
+│                                                                              │
+│ Step 5: Update Serializers                                                   │
+│                                                                              │
+│ File: apps/transfers/serializers.py                                          │
+│                                                                              │
+│ - CreateTransferSerializer: Now takes sender_phone, sender_name,             │
+│ funding_provider, payout_provider, validates corridor exists, computes       │
+│ corridor-based fee, validates gateway mappings                               │
+│ - TransferSerializer: Add all new fields to output                           │
+│ - TransferHistorySerializer: Add sender/receiver provider info               │
+│                                                                              │
+│ Step 6: Update Transfer Views                                                │
+│                                                                              │
+│ File: apps/transfers/views.py                                                │
+│                                                                              │
+│ - CreateTransferView.post(): Creates transfer with full sender+receiver      │
+│ info, calls initiate_deposit(), returns immediately with instructions for    │
+│ the sender                                                                   │
+│ - Remove _calc_fee() method (replaced by corridor-based fee in serializer)   │
+│                                                                              │
+│ Step 7: Rewrite Webhook/Callback Endpoints                                   │
+│                                                                              │
+│ File: apps/transfers/webhooks.py (full rewrite)                              │
+│                                                                              │
+│ Two new endpoints:                                                           │
+│ - POST /webhooks/awdpay/deposit/ - Handles deposit status callbacks          │
+│ - POST /webhooks/awdpay/withdrawal/ - Handles withdrawal status callbacks    │
+│                                                                              │
+│ Both handle two AWDPay callback formats:                                     │
+│ - PayDunya format: {data: {custom_data: {trxId: ref}, status:                │
+│ "completed"/"failed"}}                                                       │
+│ - MTN format: {externalId: ref, status: "SUCCESSFUL"/"FAILED"}               │
+│                                                                              │
+│ Key logic: When deposit callback = completed, automatically trigger the      │
+│ withdrawal phase.                                                            │
+│                                                                              │
+│ Step 8: Update URL Configuration                                             │
+│                                                                              │
+│ File: config/urls.py                                                         │
+│                                                                              │
+│ Replace path('webhooks/awdpay/', awdpay_webhook) with:                       │
+│ - path('webhooks/awdpay/deposit/', awdpay_deposit_callback)                  │
+│ - path('webhooks/awdpay/withdrawal/', awdpay_withdrawal_callback)            │
+│                                                                              │
+│ Step 9: Update Django Admin                                                  │
+│                                                                              │
+│ File: apps/transfers/admin.py                                                │
+│                                                                              │
+│ Add fieldsets for the new two-phase fields, search by deposit/withdrawal     │
+│ references.                                                                  │
+│                                                                              │
+│ Files Modified                                                               │
+│                                                                              │
+│ 1. config/settings/base.py - Settings                                        │
+│ 2. apps/integrations/gateway_mapping.py - NEW gateway mapping                │
+│ 3. apps/integrations/awdpay.py - Full rewrite                                │
+│ 4. apps/transfers/models.py - New fields + migration                         │
+│ 5. apps/transfers/serializers.py - Rewrite                                   │
+│ 6. apps/transfers/views.py - Rewrite CreateTransferView                      │
+│ 7. apps/transfers/webhooks.py - Full rewrite                                 │
+│ 8. config/urls.py - New callback routes                                      │
+│ 9. apps/transfers/admin.py - Admin fieldsets                                 │
+│ 10. .env - AWDPay credentials                                                │
+│                                                                              │
+│ Verification                                                                 │
+│                                                                              │
+│ 1. Run python manage.py makemigrations transfers and python manage.py        │
+│ migrate                                                                      │
+│ 2. Verify server starts: python manage.py runserver                          │
+│ 3. Check Swagger docs at / for updated transfer endpoints                    │
+│ 4. Test with Postman: create a transfer, verify deposit is initiated         │
+│ 5. Simulate deposit callback to /webhooks/awdpay/deposit/ and verify         │
+│ withdrawal is auto-triggered                                                 │
+│ 6. Simulate withdrawal callback to /webhooks/awdpay/withdrawal/ and verify   │
+│ transfer is marked completed                                                 │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+● I'll start by reading all the relevant existing files to understand the
+  current codebase before implementing changes.
+
+● Read 9 files (ctrl+o to expand)
+
+● Now let me also read the routes models to understand the Corridor,
+  PaymentMethodType, and MobileMoneyProvider structures.
+
+● Searched for 1 pattern, read 3 files (ctrl+o to expand)
+
+● Now I have a full picture of the codebase. Let me create tasks and start
+  implementing all 9 steps.
+
+● Now let me start implementing. I'll do Steps 1-3 in parallel since they're
+  independent.
+
+● Step 1: Update Settings
+
+● Update(config/settings/base.py)
+  ⎿  Error editing file
+
+● Read 1 file (ctrl+o to expand)
+
+● Update(config/settings/base.py)
+  ⎿  Added 8 lines, removed 5 lines
+      358  TRANSFER_DAILY_LIMIT_EUR = 5000
+      359  TRANSFER_QUOTE_VALIDITY_MINUTES = 5
+      360  
+      361 -# AwdPay Integration                                          
+      362 -AWDPAY_API_KEY = config('AWDPAY_API_KEY', default='')         
+      363 -AWDPAY_API_SECRET = config('AWDPAY_API_SECRET', default='')   
+      364 -AWDPAY_API_URL = config('AWDPAY_BASE_URL', default='https://ap
+          -i.awdpay.com/v1')                                             
+      365 -AWDPAY_WEBHOOK_SECRET = config('AWDPAY_WEBHOOK_SECRET', defaul
+          -t='')                                                         
+      361 +# AwdPay Integration (OAuth2 / Keycloak)                      
+      362 +AWDPAY_BASE_URL = config('AWDPAY_BASE_URL', default='https://a
+          +pi.awdpay.com')                                               
+      363 +AWDPAY_API_VERSION = config('AWDPAY_API_VERSION', default='api
+          +/v2')                                                         
+      364 +AWDPAY_KEYCLOAK_BASE_URL = config('AWDPAY_KEYCLOAK_BASE_URL', 
+          +default='')                                                   
+      365 +AWDPAY_KEYCLOAK_REALM = config('AWDPAY_KEYCLOAK_REALM', defaul
+          +t='awdpay-marchand')                                          
+      366 +AWDPAY_KEYCLOAK_CLIENT_ID = config('AWDPAY_KEYCLOAK_CLIENT_ID'
+          +, default='')                                                 
+      367 +AWDPAY_KEYCLOAK_CLIENT_SECRET = config('AWDPAY_KEYCLOAK_CLIENT
+          +_SECRET', default='')                                         
+      368 +AWDPAY_CALLBACK_BASE_URL = config('AWDPAY_CALLBACK_BASE_URL', 
+          +default='http://localhost:8000')                              
+      369  
+      370  # SMS Provider (example: Africa's Talking)
+      371  SMS_PROVIDER = config('SMS_PROVIDER', default='africastalking'
+           )
+
+● Now update the .env file:
+
+● Read 1 file (ctrl+o to expand)
+  ⎿  Found 13 new diagnostic issues in 1 file (ctrl+o to expand)
+
+● Update(.env)
+  ⎿  Added 8 lines, removed 5 lines
+      47  SMS_API_KEY=your-africastalking-api-key
+      48  SMS_USERNAME=sandbox
+      49  
+      50 -# AwdPay Integration                                           
+      51 -AWDPAY_API_KEY=your-awdpay-api-key                             
+      52 -AWDPAY_API_SECRET=your-awdpay-api-secret                       
+      53 -AWDPAY_BASE_URL=https://api.awdpay.com/v1                      
+      54 -AWDPAY_WEBHOOK_SECRET=your-webhook-secret                      
+      50 +# AwdPay Integration (OAuth2 / Keycloak)                       
+      51 +AWDPAY_BASE_URL=https://api.awdpay.com                         
+      52 +AWDPAY_API_VERSION=api/v2                                      
+      53 +AWDPAY_KEYCLOAK_BASE_URL=https://auth.awdpay.com               
+      54 +AWDPAY_KEYCLOAK_REALM=awdpay-marchand                          
+      55 +AWDPAY_KEYCLOAK_CLIENT_ID=your-keycloak-client-id              
+      56 +AWDPAY_KEYCLOAK_CLIENT_SECRET=your-keycloak-client-secret      
+      57 +AWDPAY_CALLBACK_BASE_URL=http://localhost:8000                 
+      58  
+      59  # AWS S3 (for production)
+      60  AWS_ACCESS_KEY_ID=your-aws-access-key
+
+● Step 2: Create Gateway Mapping Module
+
+● Write(apps/integrations/gateway_mapping.py)
+  ⎿  Wrote 62 lines to apps/integrations/gateway_mapping.py
+       1 # apps/integrations/gateway_mapping.py
+       2 
+       3 """
+       4 Maps internal MobileMoneyProvider codes to AWDPay gateway names,
+       5 country ISO codes, and currencies.
+       6 """
+       7 
+       8 # Each entry: internal_code -> (awdpay_gateway_name, country_iso
+         , currency)
+       9 GATEWAY_MAP = {
+      10     # Cameroon (XAF)
+     … +52 lines (ctrl+o to expand)
+
+● Step 3: Rewrite AWDPay Client
+
+● Write(apps/integrations/awdpay.py)
+  ⎿  Added 217 lines, removed 64 lines
+        1 -# integrations/awdpay.py                                      
+        1 +# apps/integrations/awdpay.py                                 
+        2  
+        3 +"""                                                           
+        4 +AWDPay API client with OAuth2 (Keycloak client_credentials) au
+          +thentication.                                                 
+        5 +Supports two-phase transfers: deposit (collect from sender) th
+          +en withdrawal (payout to receiver).                           
+        6 +"""                                                           
+        7 +                                                              
+        8 +import logging                                                
+        9 +import time                                                   
+       10 +                                                              
+       11  import requests
+       12  from django.conf import settings
+       13  
+       14 +logger = logging.getLogger(__name__)                          
+       15  
+       16 +                                                              
+       17 +class AWDPayTokenError(Exception):                            
+       18 +    """Raised when OAuth2 token acquisition fails."""         
+       19 +                                                              
+       20 +                                                              
+       21 +class AWDPayAPIError(Exception):                              
+       22 +    """Raised when an AWDPay API call fails."""               
+       23 +                                                              
+       24 +    def __init__(self, message: str, status_code: int | None =
+          + None, response_data: dict | None = None):                    
+       25 +        super().__init__(message)                             
+       26 +        self.status_code = status_code                        
+       27 +        self.response_data = response_data or {}              
+       28 +                                                              
+       29 +                                                              
+       30  class AwdPayClient:
+        8 -    base_url: str                                             
+        9 -    api_key: str                                              
+       31 +    """                                                       
+       32 +    AWDPay REST client.                                       
+       33  
+       11 -    def __init__(self, base_url: str | None = None, api_key: s
+          -tr | None = None):                                            
+       12 -        self.base_url = base_url or settings.AWDPAY_API_URL   
+       13 -        self.api_key = api_key or settings.AWDPAY_API_KEY     
+       34 +    - Authenticates via Keycloak client_credentials grant     
+       35 +    - Caches the access token in memory, refreshes 60s before 
+          +expiry                                                        
+       36 +    - Provides methods for deposit, withdrawal, status checks,
+          + and info queries                                             
+       37 +    """                                                       
+       38  
+       39 +    _token: str | None = None                                 
+       40 +    _token_expires_at: float = 0.0                            
+       41 +                                                              
+       42 +    def __init__(self):                                       
+       43 +        self.base_url = settings.AWDPAY_BASE_URL.rstrip('/')  
+       44 +        self.api_version = settings.AWDPAY_API_VERSION.strip('
+          +/')                                                           
+       45 +        self.keycloak_base_url = settings.AWDPAY_KEYCLOAK_BASE
+          +_URL.rstrip('/')                                              
+       46 +        self.keycloak_realm = settings.AWDPAY_KEYCLOAK_REALM  
+       47 +        self.keycloak_client_id = settings.AWDPAY_KEYCLOAK_CLI
+          +ENT_ID                                                        
+       48 +        self.keycloak_client_secret = settings.AWDPAY_KEYCLOAK
+          +_CLIENT_SECRET                                                
+       49 +        self.callback_base_url = settings.AWDPAY_CALLBACK_BASE
+          +_URL.rstrip('/')                                              
+       50 +                                                              
+       51 +    # --------------------------------------------------------
+          +----------                                                    
+       52 +    # OAuth2 token management                                 
+       53 +    # --------------------------------------------------------
+          +----------                                                    
+       54 +                                                              
+       55 +    def _get_token_url(self) -> str:                          
+       56 +        return (                                              
+       57 +            f"{self.keycloak_base_url}/realms/{self.keycloak_r
+          +ealm}"                                                        
+       58 +            f"/protocol/openid-connect/token"                 
+       59 +        )                                                     
+       60 +                                                              
+       61 +    def _ensure_token(self) -> str:                           
+       62 +        """Return a valid access token, refreshing if needed."
+          +""                                                            
+       63 +        now = time.time()                                     
+       64 +        if self._token and now < self._token_expires_at:      
+       65 +            return self._token                                
+       66 +                                                              
+       67 +        token_url = self._get_token_url()                     
+       68 +        payload = {                                           
+       69 +            'grant_type': 'client_credentials',               
+       70 +            'client_id': self.keycloak_client_id,             
+       71 +            'client_secret': self.keycloak_client_secret,     
+       72 +        }                                                     
+       73 +                                                              
+       74 +        try:                                                  
+       75 +            resp = requests.post(token_url, data=payload, time
+          +out=15)                                                       
+       76 +            resp.raise_for_status()                           
+       77 +            data = resp.json()                                
+       78 +        except requests.RequestException as exc:              
+       79 +            logger.error("AWDPay token request failed: %s", ex
+          +c)                                                            
+       80 +            raise AWDPayTokenError(f"Failed to obtain access t
+          +oken: {exc}") from exc                                        
+       81 +                                                              
+       82 +        self._token = data['access_token']                    
+       83 +        expires_in = data.get('expires_in', 300)              
+       84 +        # Refresh 60s before actual expiry                    
+       85 +        self._token_expires_at = now + expires_in - 60        
+       86 +        logger.info("AWDPay token acquired, expires_in=%s", ex
+          +pires_in)                                                     
+       87 +        return self._token                                    
+       88 +                                                              
+       89      def _headers(self) -> dict:
+       90 +        token = self._ensure_token()                          
+       91          return {
+       17 -            'Authorization': f'Bearer {self.api_key}',        
+       92 +            'Authorization': f'Bearer {token}',               
+       93              'Content-Type': 'application/json',
+       94          }
+       95  
+       21 -    def create_transfer(self, *, reference: str, amount: str, 
+          -currency: str,                                                
+       22 -                        recipient_phone: str, recipient_name: 
+          -str, description: str | None = None) -> dict:                 
+       23 -        payload = {                                           
+       24 -            'reference_id': reference,                        
+       25 -            'amount': amount,                                 
+       26 -            'currency': currency,                             
+       27 -            'recipient_phone': recipient_phone,               
+       28 -            'recipient_name': recipient_name,                 
+       29 -            'description': description or '',                 
+       30 -        }                                                     
+       96 +    # --------------------------------------------------------
+          +----------                                                    
+       97 +    # Internal HTTP helpers                                   
+       98 +    # --------------------------------------------------------
+          +----------                                                    
+       99 +                                                              
+      100 +    def _api_url(self, path: str) -> str:                     
+      101 +        """Build full URL: base_url / api_version / path."""  
+      102 +        return f"{self.base_url}/{self.api_version}/{path.lstr
+          +ip('/')}"                                                     
+      103 +                                                              
+      104 +    def _public_url(self, path: str) -> str:                  
+      105 +        """Build full URL for public endpoints (no api version
+          + prefix)."""                                                  
+      106 +        return f"{self.base_url}/{path.lstrip('/')}"          
+      107 +                                                              
+      108 +    def _request(self, method: str, url: str, **kwargs) -> dic
+          +t:                                                            
+      109 +        """Execute an HTTP request and return parsed JSON.""" 
+      110 +        kwargs.setdefault('headers', self._headers())         
+      111 +        kwargs.setdefault('timeout', 30)                      
+      112 +                                                              
+      113          try:
+      114 +            resp = requests.request(method, url, **kwargs)    
+      115 +        except requests.RequestException as exc:              
+      116 +            logger.error("AWDPay request error: %s %s -> %s", 
+          +method, url, exc)                                             
+      117 +            raise AWDPayAPIError(f"Request failed: {exc}") fro
+          +m exc                                                         
+      118  
+       33 -            resp = requests.post(                             
+       34 -                f"{self.base_url}/transfers/",                
+       35 -                json=payload,                                 
+       36 -                headers=self._headers(),                      
+       37 -                timeout=10,                                   
+       38 -            )                                                 
+      119 +        try:                                                  
+      120              data = resp.json()
+       40 -        except requests.RequestException as e:                
+       41 -            return {'success': False, 'error': str(e)}        
+       42 -                                                              
+       43 -        if resp.status_code not in (200, 201):                
+       44 -            return {'success': False, 'error': data.get('error
+          -', 'Transfer failed')}                                        
+       45 -        return {'success': True, 'provider_id': data.get('id')
+          -, 'raw': data}                                                
+      121 +        except ValueError:                                    
+      122 +            data = {}                                         
+      123  
+      124 +        if resp.status_code >= 400:                           
+      125 +            logger.warning(                                   
+      126 +                "AWDPay API error: %s %s -> %s %s",           
+      127 +                method, url, resp.status_code, data,          
+      128 +            )                                                 
+      129 +            raise AWDPayAPIError(                             
+      130 +                data.get('message', f"HTTP {resp.status_code}"
+          +),                                                            
+      131 +                status_code=resp.status_code,                 
+      132 +                response_data=data,                           
+      133 +            )                                                 
+      134  
+       48 -    def collect_mobile_money(self, *, amount: str, currency: s
+          -tr,msisdn: str, provider: str, reference: str, description: st
+          -r = "") -> dict:                                              
+      135 +        return data                                           
+      136 +                                                              
+      137 +    # --------------------------------------------------------
+          +----------                                                    
+      138 +    # Deposit (collect money from sender)                     
+      139 +    # --------------------------------------------------------
+          +----------                                                    
+      140 +                                                              
+      141 +    def initiate_deposit(                                     
+      142 +        self,                                                 
+      143 +        *,                                                    
+      144 +        amount: str,                                          
+      145 +        currency: str,                                        
+      146 +        gateway: str,                                         
+      147 +        phone: str,                                           
+      148 +        country: str,                                         
+      149 +        reference: str,                                       
+      150 +        description: str = '',                                
+      151 +    ) -> dict:                                                
+      152 +        """                                                   
+      153 +        POST /api/v2/classic/deposit/initiate                 
+      154 +                                                              
+      155 +        Initiates a deposit (collect) from the sender's mobile
+          + money account.                                               
+      156 +        The sender will receive a USSD prompt on their phone. 
+      157 +                                                              
+      158 +        Returns the AWDPay response dict (contains depositRef,
+          + etc.).                                                       
+      159 +        """                                                   
+      160 +        callback_url = f"{self.callback_base_url}/webhooks/awd
+          +pay/deposit/"                                                 
+      161          payload = {
+       50 -            "reference_id": reference,                        
+       51 -            "amount": amount,                                 
+       52 -            "currency": currency,                             
+       53 -            "msisdn": msisdn,                                 
+       54 -            "provider": provider,  # e.g. "mtn_cm", "orange_cm
+          -"                                                             
+       55 -            "description": description,                       
+      162 +            'amount': amount,                                 
+      163 +            'currency': currency,                             
+      164 +            'gateway': gateway,                               
+      165 +            'phone': phone,                                   
+      166 +            'country': country,                               
+      167 +            'trxId': reference,                               
+      168 +            'description': description or f'Deposit {reference
+          +}',                                                           
+      169 +            'callbackUrl': callback_url,                      
+      170          }
+       57 -        resp = requests.post(                                 
+       58 -            f"{self.base_url}/collections/mobile_money/",     
+       59 -            json=payload,                                     
+       60 -            headers=self._headers(),                          
+       61 -            timeout=10,                                       
+       62 -        )                                                     
+       63 -        data = resp.json()                                    
+       64 -        if resp.status_code not in (200, 201):                
+       65 -            return {"success": False, "error": data.get("error
+          -", "Collection failed")}                                      
+       66 -        return {"success": True, "provider_id": data.get("id")
+          -, "raw": data}                                                
+      171 +        logger.info("AWDPay initiate_deposit: ref=%s gateway=%
+          +s amount=%s", reference, gateway, amount)                     
+      172 +        return self._request('POST', self._api_url('classic/de
+          +posit/initiate'), json=payload)                               
+      173  
+       68 -    def payout_mobile_money(self, *, amount: str, currency: st
+          -r,                                                            
+       69 -                            msisdn: str, provider: str, refere
+          -nce: str, description: str = "") -> dict:                     
+      174 +    def get_deposit_status(self, deposit_ref: str) -> dict:   
+      175 +        """                                                   
+      176 +        GET /api/v2/deposit/deposits/{ref}                    
+      177 +                                                              
+      178 +        Checks the status of an existing deposit.             
+      179 +        """                                                   
+      180 +        return self._request('GET', self._api_url(f'deposit/de
+          +posits/{deposit_ref}'))                                       
+      181 +                                                              
+      182 +    # --------------------------------------------------------
+          +----------                                                    
+      183 +    # Withdrawal (payout to receiver)                         
+      184 +    # --------------------------------------------------------
+          +----------                                                    
+      185 +                                                              
+      186 +    def initiate_withdrawal(                                  
+      187 +        self,                                                 
+      188 +        *,                                                    
+      189 +        amount: str,                                          
+      190 +        currency: str,                                        
+      191 +        gateway: str,                                         
+      192 +        phone: str,                                           
+      193 +        country: str,                                         
+      194 +        reference: str,                                       
+      195 +        description: str = '',                                
+      196 +    ) -> dict:                                                
+      197 +        """                                                   
+      198 +        POST /api/v2/withdraw/initiate                        
+      199 +                                                              
+      200 +        Initiates a withdrawal (payout) to the receiver's mobi
+          +le money account.                                             
+      201 +                                                              
+      202 +        Returns the AWDPay response dict (contains withdrawRef
+          +, etc.).                                                      
+      203 +        """                                                   
+      204 +        callback_url = f"{self.callback_base_url}/webhooks/awd
+          +pay/withdrawal/"                                              
+      205          payload = {
+       71 -            "reference_id": reference,                        
+       72 -            "amount": amount,                                 
+       73 -            "currency": currency,                             
+       74 -            "msisdn": msisdn,                                 
+       75 -            "provider": provider,  # e.g. "mtn_ci"            
+       76 -            "description": description,                       
+      206 +            'amount': amount,                                 
+      207 +            'currency': currency,                             
+      208 +            'gateway': gateway,                               
+      209 +            'phone': phone,                                   
+      210 +            'country': country,                               
+      211 +            'trxId': reference,                               
+      212 +            'description': description or f'Withdrawal {refere
+          +nce}',                                                        
+      213 +            'callbackUrl': callback_url,                      
+      214          }
+       78 -        resp = requests.post(                                 
+       79 -            f"{self.base_url}/payouts/mobile_money/",         
+       80 -            json=payload,                                     
+       81 -            headers=self._headers(),                          
+       82 -            timeout=10,                                       
+       83 -        )                                                     
+       84 -        data = resp.json()                                    
+       85 -        if resp.status_code not in (200, 201):                
+       86 -            return {"success": False, "error": data.get("error
+          -", "Payout failed")}                                          
+       87 -        return {"success": True, "provider_id": data.get("id")
+          -, "raw": data}                                                
+      215 +        logger.info("AWDPay initiate_withdrawal: ref=%s gatewa
+          +y=%s amount=%s", reference, gateway, amount)                  
+      216 +        return self._request('POST', self._api_url('withdraw/i
+          +nitiate'), json=payload)                                      
+      217 +                                                              
+      218 +    def get_withdrawal_status(self, withdrawal_ref: str) -> di
+          +ct:                                                           
+      219 +        """                                                   
+      220 +        GET /api/v2/withdraw/withdrawals/{ref}                
+      221 +                                                              
+      222 +        Checks the status of an existing withdrawal.          
+      223 +        """                                                   
+      224 +        return self._request('GET', self._api_url(f'withdraw/w
+          +ithdrawals/{withdrawal_ref}'))                                
+      225 +                                                              
+      226 +    # --------------------------------------------------------
+          +----------                                                    
+      227 +    # Info / utility endpoints                                
+      228 +    # --------------------------------------------------------
+          +----------                                                    
+      229 +                                                              
+      230 +    def list_deposit_gateways(self) -> dict:                  
+      231 +        """GET /public/gateways/deposit/list"""               
+      232 +        return self._request('GET', self._public_url('public/g
+          +ateways/deposit/list'))                                       
+      233 +                                                              
+      234 +    def list_withdrawal_gateways(self) -> dict:               
+      235 +        """GET /api/v2/withdraw/list"""                       
+      236 +        return self._request('GET', self._api_url('withdraw/li
+          +st'))                                                         
+      237 +                                                              
+      238 +    def get_wallet_balance(self) -> dict:                     
+      239 +        """GET /api/v2/wallet/balance"""                      
+      240 +        return self._request('GET', self._api_url('wallet/bala
+          +nce'))                                                        
+
+● Step 4: Update Transfer Models
+
+● Read 1 file (ctrl+o to expand)
+
+● Now I'll update the models with the new status choices, XOF currency, sender
+  fields, and two-phase deposit/withdrawal tracking:
+
+● Update(apps/transfers/models.py)
+  ⎿  Added 5 lines
+      14  
+      15  class TransferStatus(models.TextChoices):
+      16      PENDING = 'pending', 'Pending'
+      17 +    DEPOSIT_PENDING = 'deposit_pending', 'Deposit Pending'     
+      18 +    DEPOSIT_CONFIRMED = 'deposit_confirmed', 'Deposit Confirmed
+         +'                                                              
+      19 +    DEPOSIT_FAILED = 'deposit_failed', 'Deposit Failed'        
+      20 +    WITHDRAWAL_PENDING = 'withdrawal_pending', 'Withdrawal Pend
+         +ing'                                                           
+      21      PROCESSING = 'processing', 'Processing'
+      22      COMPLETED = 'completed', 'Completed'
+      23      FAILED = 'failed', 'Failed'
+     ...
+      27  
+      28  class Currency(models.TextChoices):
+      29      XAF = 'XAF', 'Central African Franc'
+      30 +    XOF = 'XOF', 'West African Franc'                          
+      31      USD = 'USD', 'US Dollar'
+      32      EUR = 'EUR', 'Euro'
+      33      GBP = 'GBP', 'British Pound'
+
+● Now add the new fields to the Transfer model. I'll replace the entire Transfer
+   class:
+
+● Update(apps/transfers/models.py)
+  ⎿  Added 115 lines, removed 4 lines
+      35  
+      36  
+      37  class Transfer(TimeStampedModel, SoftDeleteModel):
+      38 -    """Single money transfer initiated by a user."""           
+      38 +    """                                                        
+      39 +    Two-phase money transfer: deposit (collect from sender) the
+         +n withdrawal (payout to receiver).                             
+      40 +    Uses AWDPay as the payment provider.                       
+      41 +    """                                                        
+      42  
+      43      id = models.UUIDField(primary_key=True, default=uuid.uuid4,
+           editable=False)
+      44  
+     ...
+      49      )
+      50  
+      51      status = models.CharField(
+      49 -        max_length=20,                                         
+      52 +        max_length=25,                                         
+      53          choices=TransferStatus.choices,
+      54          default=TransferStatus.PENDING,
+      55          db_index=True,
+      56      )
+      57  
+      58 +    # --- Sender info ---                                      
+      59 +    sender_phone = models.CharField(max_length=20, blank=True, 
+         +db_index=True)                                                 
+      60 +    sender_name = models.CharField(max_length=255, blank=True) 
+      61 +    sender_email = models.EmailField(blank=True)               
+      62 +                                                               
+      63 +    # --- Funding & payout providers ---                       
+      64 +    funding_mobile_provider = models.CharField(                
+      65 +        max_length=50,                                         
+      66 +        choices=MobileMoneyProvider.choices,                   
+      67 +        blank=True,                                            
+      68 +        help_text="Sender's mobile money provider (e.g. mtn_cm)
+         +.",                                                            
+      69 +    )                                                          
+      70 +    payout_mobile_provider = models.CharField(                 
+      71 +        max_length=50,                                         
+      72 +        choices=MobileMoneyProvider.choices,                   
+      73 +        blank=True,                                            
+      74 +        help_text="Receiver's mobile money provider (e.g. wave_
+         +ci).",                                                         
+      75 +    )                                                          
+      76 +                                                               
+      77 +    # --- Corridor ---                                         
+      78 +    corridor = models.ForeignKey(                              
+      79 +        Corridor,                                              
+      80 +        on_delete=models.PROTECT,                              
+      81 +        related_name='transfers',                              
+      82 +        null=True,                                             
+      83 +        blank=True,                                            
+      84 +        help_text="Source -> destination corridor used for this
+         + transfer.",                                                   
+      85 +    )                                                          
+      86 +                                                               
+      87 +    # --- Source amount (what the sender pays) ---             
+      88      amount = models.DecimalField(
+      89          max_digits=15,
+      90          decimal_places=2,
+     ...
+       96          default=Currency.XAF,
+       97      )
+       98  
+       99 +    # --- Destination amount (what the receiver gets) ---     
+      100 +    destination_amount = models.DecimalField(                 
+      101 +        max_digits=15,                                        
+      102 +        decimal_places=2,                                     
+      103 +        null=True,                                            
+      104 +        blank=True,                                           
+      105 +        help_text="Amount the receiver gets in destination cur
+          +rency.",                                                      
+      106 +    )                                                         
+      107 +    destination_currency = models.CharField(                  
+      108 +        max_length=3,                                         
+      109 +        choices=Currency.choices,                             
+      110 +        blank=True,                                           
+      111 +        help_text="Currency the receiver gets (e.g. XOF).",   
+      112 +    )                                                         
+      113 +                                                              
+      114      service_fee = models.DecimalField(
+      115          max_digits=15,
+      116          decimal_places=2,
+     ...
+      122          help_text="amount + service_fee",
+      123      )
+      124  
+      125 +    # --- Recipient info ---                                  
+      126      recipient_name = models.CharField(max_length=255)
+      127      recipient_phone = models.CharField(max_length=20, db_index
+           =True)
+      128      recipient_email = models.EmailField(blank=True)
+      129  
+       81 -    # External provider metadata                              
+      130 +    # --- External provider metadata ---                      
+      131      provider = models.CharField(max_length=50, default='awdpay
+           ')
+      132      reference = models.CharField(
+      133          max_length=64,
+     ...
+      142          help_text="ID returned by provider (AwdPay).",
+      143      )
+      144  
+      145 +    # --- AWDPay Deposit (phase 1: collect from sender) ---   
+      146 +    deposit_reference = models.CharField(max_length=128, blank
+          +=True, db_index=True)                                         
+      147 +    deposit_status = models.CharField(max_length=50, blank=Tru
+          +e)                                                            
+      148 +    deposit_gateway = models.CharField(max_length=50, blank=Tr
+          +ue)                                                           
+      149 +    deposit_initiated_at = models.DateTimeField(null=True, bla
+          +nk=True)                                                      
+      150 +    deposit_confirmed_at = models.DateTimeField(null=True, bla
+          +nk=True)                                                      
+      151 +                                                              
+      152 +    # --- AWDPay Withdrawal (phase 2: payout to receiver) --- 
+      153 +    withdrawal_reference = models.CharField(max_length=128, bl
+          +ank=True, db_index=True)                                      
+      154 +    withdrawal_status = models.CharField(max_length=50, blank=
+          +True)                                                         
+      155 +    withdrawal_gateway = models.CharField(max_length=50, blank
+          +=True)                                                        
+      156 +    withdrawal_initiated_at = models.DateTimeField(null=True, 
+          +blank=True)                                                   
+      157 +    withdrawal_confirmed_at = models.DateTimeField(null=True, 
+          +blank=True)                                                   
+      158 +                                                              
+      159      description = models.TextField(blank=True)
+      160  
+      161      completed_at = models.DateTimeField(null=True, blank=True)
+     ...
+      172              models.Index(fields=['status', '-created_at']),
+      173              models.Index(fields=['reference']),
+      174              models.Index(fields=['provider_id']),
+      175 +            models.Index(fields=['deposit_reference']),       
+      176 +            models.Index(fields=['withdrawal_reference']),    
+      177          ]
+      178  
+      179      def save(self, *args, **kwargs):
+     ...
+      181              self.total_amount = (self.amount or 0) + (self.ser
+           vice_fee or 0)
+      182          super().save(*args, **kwargs)
+      183  
+      184 +    # --- State machine helpers ---                           
+      185 +                                                              
+      186 +    def mark_deposit_pending(self, deposit_ref: str, gateway: 
+          +str):                                                         
+      187 +        self.status = TransferStatus.DEPOSIT_PENDING          
+      188 +        self.deposit_reference = deposit_ref                  
+      189 +        self.deposit_gateway = gateway                        
+      190 +        self.deposit_status = 'pending'                       
+      191 +        self.deposit_initiated_at = timezone.now()            
+      192 +        self.save(update_fields=[                             
+      193 +            'status', 'deposit_reference', 'deposit_gateway', 
+      194 +            'deposit_status', 'deposit_initiated_at', 'updated
+          +_at',                                                         
+      195 +        ])                                                    
+      196 +                                                              
+      197 +    def mark_deposit_confirmed(self):                         
+      198 +        self.status = TransferStatus.DEPOSIT_CONFIRMED        
+      199 +        self.deposit_status = 'completed'                     
+      200 +        self.deposit_confirmed_at = timezone.now()            
+      201 +        self.save(update_fields=[                             
+      202 +            'status', 'deposit_status', 'deposit_confirmed_at'
+          +, 'updated_at',                                               
+      203 +        ])                                                    
+      204 +                                                              
+      205 +    def mark_deposit_failed(self, message: str = '', code: str
+          + = ''):                                                       
+      206 +        self.status = TransferStatus.DEPOSIT_FAILED           
+      207 +        self.deposit_status = 'failed'                        
+      208 +        self.error_message = message                          
+      209 +        self.error_code = code                                
+      210 +        self.save(update_fields=[                             
+      211 +            'status', 'deposit_status', 'error_message', 'erro
+          +r_code', 'updated_at',                                        
+      212 +        ])                                                    
+      213 +                                                              
+      214 +    def mark_withdrawal_pending(self, withdrawal_ref: str, gat
+          +eway: str):                                                   
+      215 +        self.status = TransferStatus.WITHDRAWAL_PENDING       
+      216 +        self.withdrawal_reference = withdrawal_ref            
+      217 +        self.withdrawal_gateway = gateway                     
+      218 +        self.withdrawal_status = 'pending'                    
+      219 +        self.withdrawal_initiated_at = timezone.now()         
+      220 +        self.save(update_fields=[                             
+      221 +            'status', 'withdrawal_reference', 'withdrawal_gate
+          +way',                                                         
+      222 +            'withdrawal_status', 'withdrawal_initiated_at', 'u
+          +pdated_at',                                                   
+      223 +        ])                                                    
+      224 +                                                              
+      225      def mark_completed(self):
+      226          self.status = TransferStatus.COMPLETED
+      227 +        self.withdrawal_status = 'completed'                  
+      228 +        self.withdrawal_confirmed_at = timezone.now()         
+      229          self.completed_at = timezone.now()
+      122 -        self.save(update_fields=['status', 'completed_at', 'up
+          -dated_at'])                                                   
+      230 +        self.save(update_fields=[                             
+      231 +            'status', 'withdrawal_status', 'withdrawal_confirm
+          +ed_at',                                                       
+      232 +            'completed_at', 'updated_at',                     
+      233 +        ])                                                    
+      234  
+      235      def mark_failed(self, message: str, code: str | None = Non
+           e):
+      236          self.status = TransferStatus.FAILED
+
+● Also update the audit log event choices to include the new two-phase events:
+
+● Update(apps/transfers/models.py)
+  ⎿  Added 6 lines
+      385          choices=[
+      386              ('created', 'Created'),
+      387              ('provider_init', 'Provider Initiated'),
+      388 +            ('deposit_initiated', 'Deposit Initiated'),       
+      389 +            ('deposit_confirmed', 'Deposit Confirmed'),       
+      390 +            ('deposit_failed', 'Deposit Failed'),             
+      391 +            ('withdrawal_initiated', 'Withdrawal Initiated'), 
+      392 +            ('withdrawal_confirmed', 'Withdrawal Confirmed'), 
+      393 +            ('withdrawal_failed', 'Withdrawal Failed'),       
+      394              ('completed', 'Completed'),
+      395              ('failed', 'Failed'),
+      396              ('webhook_received', 'Webhook Received'),
+
+● Step 5: Update Serializers
+
+● Write(apps/transfers/serializers.py)
+  ⎿  Added 92 lines
+       1  # apps/transfers/serializers.py
+       2  
+       3 +from decimal import Decimal                                    
+       4 +                                                               
+       5  from rest_framework import serializers
+       6  from django.utils import timezone
+       7  
+       8  from .models import Transfer, TransferLimitSnapshot, Currency
+       9  from apps.kyc.models import KYCProfile
+      10 +from apps.routes.models import Corridor, MobileMoneyProvider   
+      11 +from apps.integrations.gateway_mapping import get_gateway_info 
+      12  
+      13  
+      14  class CreateTransferSerializer(serializers.Serializer):
+      15 +    # Sender info                                              
+      16 +    sender_phone = serializers.CharField(max_length=20)        
+      17 +    sender_name = serializers.CharField(max_length=255)        
+      18 +                                                               
+      19 +    # Recipient info                                           
+      20      recipient_name = serializers.CharField(max_length=255)
+      21      recipient_phone = serializers.CharField(max_length=20)
+      22      recipient_email = serializers.EmailField(required=False, al
+          low_blank=True)
+      23 +                                                               
+      24 +    # Transfer details                                         
+      25      amount = serializers.DecimalField(max_digits=15, decimal_pl
+          aces=2, min_value=100)
+      26      currency = serializers.ChoiceField(choices=Currency.choices
+          , default=Currency.XAF)
+      27      description = serializers.CharField(max_length=500, require
+          d=False, allow_blank=True)
+      28 +                                                               
+      29 +    # Providers                                                
+      30 +    funding_provider = serializers.ChoiceField(choices=MobileMo
+         +neyProvider.choices)                                           
+      31 +    payout_provider = serializers.ChoiceField(choices=MobileMon
+         +eyProvider.choices)                                            
+      32 +                                                               
+      33      device_id = serializers.CharField(max_length=255)
+      34  
+      35 +    def validate_funding_provider(self, value):                
+      36 +        info = get_gateway_info(value)                         
+      37 +        if not info:                                           
+      38 +            raise serializers.ValidationError(f"Unsupported fun
+         +ding provider: {value}")                                       
+      39 +        return value                                           
+      40 +                                                               
+      41 +    def validate_payout_provider(self, value):                 
+      42 +        info = get_gateway_info(value)                         
+      43 +        if not info:                                           
+      44 +            raise serializers.ValidationError(f"Unsupported pay
+         +out provider: {value}")                                        
+      45 +        return value                                           
+      46 +                                                               
+      47      def validate(self, attrs):
+      48          request = self.context['request']
+      49          user = request.user
+     ...
+      55          except KYCProfile.DoesNotExist:
+      56              raise serializers.ValidationError("Complete your KY
+          C profile to send money.")
+      57  
+      58 +        # Resolve gateway info for both providers              
+      59 +        funding_info = get_gateway_info(attrs['funding_provider
+         +'])                                                            
+      60 +        payout_info = get_gateway_info(attrs['payout_provider']
+         +)                                                              
+      61 +                                                               
+      62 +        # Look up corridor from source country -> destination c
+         +ountry                                                         
+      63 +        try:                                                   
+      64 +            corridor = Corridor.objects.get(                   
+      65 +                source_country__iso_code=funding_info['country'
+         +],                                                             
+      66 +                destination_country__iso_code=payout_info['coun
+         +try'],                                                         
+      67 +                is_active=True,                                
+      68 +            )                                                  
+      69 +        except Corridor.DoesNotExist:                          
+      70 +            raise serializers.ValidationError(                 
+      71 +                f"No active corridor from {funding_info['countr
+         +y']} to {payout_info['country']}."                             
+      72 +            )                                                  
+      73 +                                                               
+      74 +        # Corridor amount constraints                          
+      75 +        if amount < corridor.min_amount:                       
+      76 +            raise serializers.ValidationError({                
+      77 +                'amount': f"Minimum amount for this corridor is
+         + {corridor.min_amount}."                                       
+      78 +            })                                                 
+      79 +        if amount > corridor.max_amount:                       
+      80 +            raise serializers.ValidationError({                
+      81 +                'amount': f"Maximum amount for this corridor is
+         + {corridor.max_amount}."                                       
+      82 +            })                                                 
+      83 +                                                               
+      84          # Get limits based on KYC
+      85          limits = kyc_profile.get_transaction_limit()
+      86          snapshot = TransferLimitSnapshot.for_user(user)
+     ...
+      105                  'amount': f"Monthly limit exceeded. Remaining 
+           this month: {remaining} {attrs['currency']}."
+      106              })
+      107  
+      108 +        # Compute corridor-based fee                          
+      109 +        fee = corridor.fixed_fee + (amount * corridor.percenta
+          +ge_fee / Decimal('100'))                                      
+      110 +                                                              
+      111          attrs['kyc_profile'] = kyc_profile
+      112          attrs['snapshot'] = snapshot
+      113          attrs['limits'] = limits
+      114 +        attrs['corridor'] = corridor                          
+      115 +        attrs['service_fee'] = fee.quantize(Decimal('0.01'))  
+      116 +        attrs['funding_info'] = funding_info                  
+      117 +        attrs['payout_info'] = payout_info                    
+      118          return attrs
+      119  
+      120  
+     ...
+      127              'id',
+      128              'status',
+      129              'status_display',
+      130 +            # Sender                                          
+      131 +            'sender_phone',                                   
+      132 +            'sender_name',                                    
+      133 +            'sender_email',                                   
+      134 +            'funding_mobile_provider',                        
+      135 +            # Source amount                                   
+      136              'amount',
+      137              'currency',
+      138              'service_fee',
+      139              'total_amount',
+      140 +            # Destination amount                              
+      141 +            'destination_amount',                             
+      142 +            'destination_currency',                           
+      143 +            # Payout                                          
+      144 +            'payout_mobile_provider',                         
+      145 +            # Recipient                                       
+      146              'recipient_name',
+      147              'recipient_phone',
+      148              'recipient_email',
+      149 +            # Reference                                       
+      150              'reference',
+      151              'provider',
+      152              'provider_id',
+      153 +            # Deposit phase                                   
+      154 +            'deposit_reference',                              
+      155 +            'deposit_status',                                 
+      156 +            'deposit_gateway',                                
+      157 +            'deposit_initiated_at',                           
+      158 +            'deposit_confirmed_at',                           
+      159 +            # Withdrawal phase                                
+      160 +            'withdrawal_reference',                           
+      161 +            'withdrawal_status',                              
+      162 +            'withdrawal_gateway',                             
+      163 +            'withdrawal_initiated_at',                        
+      164 +            'withdrawal_confirmed_at',                        
+      165 +            # Other                                           
+      166              'description',
+      167              'created_at',
+      168              'completed_at',
+     ...
+      183              'status_display',
+      184              'amount',
+      185              'currency',
+      186 +            'destination_amount',                             
+      187 +            'destination_currency',                           
+      188 +            'funding_mobile_provider',                        
+      189 +            'payout_mobile_provider',                         
+      190 +            'sender_phone',                                   
+      191              'recipient_name',
+      192              'recipient_phone',
+      193              'created_at',
+
+● Step 6: Update Transfer Views
+
+● Write(apps/transfers/views.py)
+  ⎿  Added 66 lines, removed 68 lines
+      1  # apps/transfers/views.py
+      2  
+      3 +import logging                                                  
+      4 +import uuid                                                     
+      5 +                                                                
+      6  from rest_framework.views import APIView
+      7  from rest_framework.response import Response
+      8  from rest_framework.permissions import IsAuthenticated
+     ...
+      10  from rest_framework import status
+      11  from django.db import transaction as db_transaction
+      12  from django.utils import timezone
+      10 -from django.conf import settings                               
+      11 -import uuid                                                    
+      13  
+      14  from .models import Transfer, TransferLimitSnapshot, TransferAu
+          ditLog, TransferStatus
+      15  from .serializers import (
+     ...
+      18      TransferHistorySerializer,
+      19      TransferLimitSerializer,
+      20  )
+      20 -from apps.integrations.awdpay import AwdPayClient              
+      21 -from apps.core.utils import get_client_ip  # you likely already
+         - have something like this                                      
+      22 -from decimal import Decimal                                    
+      21 +from apps.integrations.awdpay import AwdPayClient, AWDPayAPIErr
+         +or, AWDPayTokenError                                           
+      22 +from apps.core.utils import get_client_ip                      
+      23  
+      24 +logger = logging.getLogger(__name__)                           
+      25 +                                                               
+      26 +                                                               
+      27  class TransferThrottle(UserRateThrottle):
+      25 -    scope = 'transaction'  # matches your DRF throttle rates   
+      28 +    scope = 'transaction'                                      
+      29  
+      30  
+      31  class CreateTransferView(APIView):
+      32      permission_classes = [IsAuthenticated]
+      30 -    # throttle_classes = [TransferThrottle]                    
+      33  
+      34      @db_transaction.atomic
+      35      def post(self, request):
+     ...
+      42          data = serializer.validated_data
+      43          user = request.user
+      44          snapshot: TransferLimitSnapshot = data['snapshot']
+      45 +        corridor = data['corridor']                            
+      46 +        funding_info = data['funding_info']                    
+      47 +        payout_info = data['payout_info']                      
+      48  
+      49          reference = f"TRF-{uuid.uuid4().hex[:12].upper()}"
+      50  
+      51          transfer = Transfer.objects.create(
+      52              user=user,
+      48 -            amount=data['amount'],                             
+      49 -            currency=data['currency'],                         
+      53 +            # Sender                                           
+      54 +            sender_phone=data['sender_phone'],                 
+      55 +            sender_name=data['sender_name'],                   
+      56 +            sender_email=user.email,                           
+      57 +            funding_mobile_provider=data['funding_provider'],  
+      58 +            # Recipient                                        
+      59              recipient_name=data['recipient_name'],
+      60              recipient_phone=data['recipient_phone'],
+      61              recipient_email=data.get('recipient_email', ''),
+      62 +            # Payout                                           
+      63 +            payout_mobile_provider=data['payout_provider'],    
+      64 +            # Corridor                                         
+      65 +            corridor=corridor,                                 
+      66 +            # Source amount                                    
+      67 +            amount=data['amount'],                             
+      68 +            currency=data['currency'],                         
+      69 +            service_fee=data['service_fee'],                   
+      70 +            # Destination (same amount for now; exchange logic 
+         +can be added later)                                            
+      71 +            destination_amount=data['amount'],                 
+      72 +            destination_currency=payout_info['currency'],      
+      73 +            # Meta                                             
+      74              description=data.get('description', ''),
+      54 -            service_fee=self._calc_fee(data['amount']),        
+      75              reference=reference,
+      76              provider='awdpay',
+      77 +            # Gateways (store for reference)                   
+      78 +            deposit_gateway=funding_info['gateway'],           
+      79 +            withdrawal_gateway=payout_info['gateway'],         
+      80          )
+      81          transfer.total_amount = transfer.amount + transfer.serv
+          ice_fee
+      82          transfer.save(update_fields=['total_amount'])
+     ...
+       87              metadata={
+       88                  'device_id': data['device_id'],
+       89                  'kyc_level': data['kyc_profile'].kyc_level,
+       90 +                'funding_provider': data['funding_provider'], 
+       91 +                'payout_provider': data['payout_provider'],   
+       92              },
+       93              ip=get_client_ip(request),
+       94          )
+       95  
+       96 +        # Initiate deposit (phase 1: collect from sender)     
+       97          client = AwdPayClient()
+       72 -        provider_res = client.create_transfer(                
+       73 -            reference=reference,                              
+       74 -            amount=str(transfer.amount),                      
+       75 -            currency=transfer.currency,                       
+       76 -            recipient_phone=transfer.recipient_phone,         
+       77 -            recipient_name=transfer.recipient_name,           
+       78 -            description=transfer.description,                 
+       79 -        )                                                     
+       80 -                                                              
+       81 -        if not provider_res['success']:                       
+       82 -            transfer.mark_failed(provider_res['error'], code='
+          -PROVIDER_ERROR')                                              
+       98 +        try:                                                  
+       99 +            deposit_res = client.initiate_deposit(            
+      100 +                amount=str(transfer.total_amount),            
+      101 +                currency=funding_info['currency'],            
+      102 +                gateway=funding_info['gateway'],              
+      103 +                phone=transfer.sender_phone,                  
+      104 +                country=funding_info['country'],              
+      105 +                reference=reference,                          
+      106 +                description=transfer.description or f"Transfer
+          + {reference}",                                                
+      107 +            )                                                 
+      108 +        except (AWDPayAPIError, AWDPayTokenError) as exc:     
+      109 +            transfer.mark_failed(str(exc), code='DEPOSIT_INIT_
+          +ERROR')                                                       
+      110              TransferAuditLog.log(
+       84 -                transfer,                                     
+       85 -                'failed',                                     
+       86 -                metadata={'provider_error': provider_res['erro
+          -r']},                                                         
+      111 +                transfer, 'failed',                           
+      112 +                metadata={'error': str(exc)},                 
+      113                  ip=get_client_ip(request),
+      114              )
+      115              return Response(
+      116                  {
+      117                      'success': False,
+       92 -                    'error': provider_res['error'],           
+       93 -                    'error_code': 'TRANSFER_FAILED',          
+      118 +                    'error': str(exc),                        
+      119 +                    'error_code': 'DEPOSIT_INIT_ERROR',       
+      120                  },
+      121                  status=status.HTTP_400_BAD_REQUEST,
+      122              )
+      123  
+       98 -        transfer.status = TransferStatus.PROCESSING           
+       99 -        transfer.provider_id = provider_res['provider_id']    
+      100 -        transfer.save(update_fields=['status', 'provider_id'])
+      124 +        # Mark deposit pending                                
+      125 +        deposit_ref = deposit_res.get('depositRef', deposit_re
+          +s.get('ref', reference))                                      
+      126 +        transfer.mark_deposit_pending(deposit_ref, funding_inf
+          +o['gateway'])                                                 
+      127  
+      128 +        # Update user limits                                  
+      129          snapshot.total_sent += transfer.amount
+      130          snapshot.transfer_count += 1
+      131          snapshot.daily_sent += transfer.amount
+     ...
+      133          snapshot.save()
+      134  
+      135          TransferAuditLog.log(
+      109 -            transfer,                                         
+      110 -            'provider_init',                                  
+      111 -            metadata={'provider_id': transfer.provider_id},   
+      136 +            transfer, 'deposit_initiated',                    
+      137 +            metadata={                                        
+      138 +                'deposit_ref': deposit_ref,                   
+      139 +                'gateway': funding_info['gateway'],           
+      140 +                'awdpay_response': deposit_res,               
+      141 +            },                                                
+      142              ip=get_client_ip(request),
+      143          )
+      144  
+     ...
+      146          return Response(
+      147              {
+      148                  'success': True,
+      119 -                'message': 'Transfer initiated successfully.',
+      149 +                'message': (                                  
+      150 +                    'Transfer initiated. A USSD prompt has bee
+          +n sent to the sender\'s phone. '                              
+      151 +                    'Please confirm the payment on your mobile
+          + device.'                                                     
+      152 +                ),                                            
+      153                  'data': out.data,
+      154              },
+      155              status=status.HTTP_201_CREATED,
+      156          )
+      157  
+      125 -    def _calc_fee(self, amount, currency='XAF'):              
+      158  
+      127 -        # fee_rate = Decimal('0.01')  # 1%                    
+      128 -        # min_fee = Decimal('50')                             
+      129 -        # max_fee = Decimal('500')                            
+      130 -                                                              
+      131 -        # # Calculate fee                                     
+      132 -        # fee = amount * fee_rate                             
+      133 -                                                              
+      134 -        # # Apply min/max bounds                              
+      135 -        # if fee < min_fee:                                   
+      136 -        #     fee = min_fee                                   
+      137 -        # elif fee > max_fee:                                 
+      138 -        #     fee = max_fee                                   
+      139 -                                                              
+      140 -        # return fee                                          
+      141 -                                                              
+      142 -        amount = Decimal(str(amount))  # Ensure Decimal       
+      143 -                                                              
+      144 -        # Fee tiers                                           
+      145 -        if amount <= Decimal('10000'):                        
+      146 -            return Decimal('50')                              
+      147 -                                                              
+      148 -        elif amount <= Decimal('50000'):                      
+      149 -            fee = amount * Decimal('0.01')  # 1%              
+      150 -            return max(Decimal('100'), min(fee, Decimal('500')
+          -))                                                            
+      151 -                                                              
+      152 -        elif amount <= Decimal('200000'):                     
+      153 -            fee = amount * Decimal('0.008')  # 0.8%           
+      154 -            return max(Decimal('500'), min(fee, Decimal('1500'
+          -)))                                                           
+      155 -                                                              
+      156 -        else:  # > 200,000                                    
+      157 -            fee = amount * Decimal('0.005')  # 0.5%           
+      158 -            return max(Decimal('1500'), min(fee, Decimal('5000
+          -')))                                                          
+      159 -                                                              
+      160 -                                                              
+      159  class TransferHistoryView(APIView):
+      160      permission_classes = [IsAuthenticated]
+      161  
+
+● Step 7: Rewrite Webhook Endpoints
+
+● Write(apps/transfers/webhooks.py)
+  ⎿  Added 175 lines, removed 29 lines
+        1  # apps/transfers/webhooks.py
+        2  
+        3 +"""                                                           
+        4 +AWDPay callback endpoints for the two-phase transfer flow.    
+        5 +                                                              
+        6 +Two endpoints:                                                
+        7 +  POST /webhooks/awdpay/deposit/     - deposit status callback
+          +s                                                             
+        8 +  POST /webhooks/awdpay/withdrawal/  - withdrawal status callb
+          +acks                                                          
+        9 +                                                              
+       10 +AWDPay sends callbacks in two possible formats depending on th
+          +e gateway:                                                    
+       11 +                                                              
+       12 +PayDunya format:                                              
+       13 +  {                                                           
+       14 +    "data": {                                                 
+       15 +      "custom_data": {"trxId": "<reference>"},                
+       16 +      "status": "completed" | "failed"                        
+       17 +    }                                                         
+       18 +  }                                                           
+       19 +                                                              
+       20 +MTN format:                                                   
+       21 +  {                                                           
+       22 +    "externalId": "<reference>",                              
+       23 +    "status": "SUCCESSFUL" | "FAILED"                         
+       24 +  }                                                           
+       25 +"""                                                           
+       26 +                                                              
+       27 +import json                                                   
+       28 +import logging                                                
+       29 +                                                              
+       30  from django.views.decorators.csrf import csrf_exempt
+       31  from django.views.decorators.http import require_POST
+       32  from django.http import JsonResponse
+        6 -from django.conf import settings                              
+        7 -import json                                                   
+        8 -import hmac                                                   
+        9 -import hashlib                                                
+       33  
+       34  from .models import Transfer, TransferStatus, TransferAuditLog
+       35 +from apps.integrations.awdpay import AwdPayClient, AWDPayAPIEr
+          +ror, AWDPayTokenError                                         
+       36 +from apps.integrations.gateway_mapping import get_gateway_info
+       37  
+       38 +logger = logging.getLogger(__name__)                          
+       39  
+       14 -def _verify_signature(request) -> bool:                       
+       15 -    secret = settings.AWDPAY_WEBHOOK_SECRET.encode()          
+       16 -    received = request.META.get('HTTP_X_AWDPAY_SIGNATURE', '')
+       17 -    computed = hmac.new(secret, request.body, hashlib.sha256).
+          -hexdigest()                                                   
+       18 -    return hmac.compare_digest(received, computed)            
+       40  
+       41 +def _parse_callback(payload: dict) -> tuple[str | None, str | 
+          +None]:                                                        
+       42 +    """                                                       
+       43 +    Extract (reference, status_str) from either PayDunya or MT
+          +N callback format.                                            
+       44 +    Returns (None, None) if the format is unrecognised.       
+       45 +    """                                                       
+       46 +    # PayDunya format                                         
+       47 +    data_block = payload.get('data')                          
+       48 +    if isinstance(data_block, dict):                          
+       49 +        custom = data_block.get('custom_data', {})            
+       50 +        ref = custom.get('trxId')                             
+       51 +        st = data_block.get('status', '').lower()             
+       52 +        if ref and st:                                        
+       53 +            return ref, st                                    
+       54  
+       55 +    # MTN format                                              
+       56 +    ref = payload.get('externalId')                           
+       57 +    st = payload.get('status', '').upper()                    
+       58 +    if ref and st:                                            
+       59 +        # Normalise MTN statuses                              
+       60 +        status_map = {                                        
+       61 +            'SUCCESSFUL': 'completed',                        
+       62 +            'FAILED': 'failed',                               
+       63 +            'PENDING': 'pending',                             
+       64 +        }                                                     
+       65 +        return ref, status_map.get(st, st.lower())            
+       66 +                                                              
+       67 +    return None, None                                         
+       68 +                                                              
+       69 +                                                              
+       70 +def _trigger_withdrawal(transfer: Transfer):                  
+       71 +    """                                                       
+       72 +    After deposit is confirmed, automatically initiate the wit
+          +hdrawal (payout) phase.                                       
+       73 +    """                                                       
+       74 +    payout_info = get_gateway_info(transfer.payout_mobile_prov
+          +ider)                                                         
+       75 +    if not payout_info:                                       
+       76 +        msg = f"No gateway mapping for payout provider: {trans
+          +fer.payout_mobile_provider}"                                  
+       77 +        logger.error(msg)                                     
+       78 +        transfer.mark_failed(msg, code='PAYOUT_GATEWAY_MISSING
+          +')                                                            
+       79 +        TransferAuditLog.log(transfer, 'failed', metadata={'er
+          +ror': msg})                                                   
+       80 +        return                                                
+       81 +                                                              
+       82 +    client = AwdPayClient()                                   
+       83 +    try:                                                      
+       84 +        withdrawal_res = client.initiate_withdrawal(          
+       85 +            amount=str(transfer.destination_amount or transfer
+          +.amount),                                                     
+       86 +            currency=payout_info['currency'],                 
+       87 +            gateway=payout_info['gateway'],                   
+       88 +            phone=transfer.recipient_phone,                   
+       89 +            country=payout_info['country'],                   
+       90 +            reference=transfer.reference,                     
+       91 +            description=f"Payout for {transfer.reference}",   
+       92 +        )                                                     
+       93 +    except (AWDPayAPIError, AWDPayTokenError) as exc:         
+       94 +        logger.error("Withdrawal initiation failed for %s: %s"
+          +, transfer.reference, exc)                                    
+       95 +        transfer.mark_failed(str(exc), code='WITHDRAWAL_INIT_E
+          +RROR')                                                        
+       96 +        TransferAuditLog.log(transfer, 'withdrawal_failed', me
+          +tadata={'error': str(exc)})                                   
+       97 +        return                                                
+       98 +                                                              
+       99 +    withdrawal_ref = withdrawal_res.get('withdrawRef', withdra
+          +wal_res.get('ref', transfer.reference))                       
+      100 +    transfer.mark_withdrawal_pending(withdrawal_ref, payout_in
+          +fo['gateway'])                                                
+      101 +                                                              
+      102 +    TransferAuditLog.log(                                     
+      103 +        transfer, 'withdrawal_initiated',                     
+      104 +        metadata={                                            
+      105 +            'withdrawal_ref': withdrawal_ref,                 
+      106 +            'gateway': payout_info['gateway'],                
+      107 +            'awdpay_response': withdrawal_res,                
+      108 +        },                                                    
+      109 +    )                                                         
+      110 +    logger.info("Withdrawal initiated for transfer %s, ref=%s"
+          +, transfer.reference, withdrawal_ref)                         
+      111 +                                                              
+      112 +                                                              
+      113  @csrf_exempt
+      114  @require_POST
+       23 -def awdpay_webhook(request):                                  
+       24 -    if not _verify_signature(request):                        
+       25 -        return JsonResponse({'error': 'Invalid signature'}, st
+          -atus=401)                                                     
+      115 +def awdpay_deposit_callback(request):                         
+      116 +    """Handle deposit (collect) status callbacks from AWDPay."
+          +""                                                            
+      117 +    try:                                                      
+      118 +        payload = json.loads(request.body)                    
+      119 +    except json.JSONDecodeError:                              
+      120 +        return JsonResponse({'error': 'Invalid JSON'}, status=
+          +400)                                                          
+      121  
+      122 +    logger.info("Deposit callback received: %s", payload)     
+      123 +                                                              
+      124 +    ref, callback_status = _parse_callback(payload)           
+      125 +    if not ref or not callback_status:                        
+      126 +        logger.warning("Deposit callback: could not parse refe
+          +rence/status from payload")                                   
+      127 +        return JsonResponse({'error': 'Unrecognised callback f
+          +ormat'}, status=400)                                          
+      128 +                                                              
+      129      try:
+      130 +        transfer = Transfer.objects.get(reference=ref)        
+      131 +    except Transfer.DoesNotExist:                             
+      132 +        logger.warning("Deposit callback: transfer not found f
+          +or ref=%s", ref)                                              
+      133 +        return JsonResponse({'error': 'Transfer not found'}, s
+          +tatus=404)                                                    
+      134 +                                                              
+      135 +    TransferAuditLog.log(                                     
+      136 +        transfer, 'webhook_received',                         
+      137 +        metadata={'phase': 'deposit', 'callback_status': callb
+          +ack_status, 'raw': payload},                                  
+      138 +    )                                                         
+      139 +                                                              
+      140 +    if callback_status == 'completed':                        
+      141 +        if transfer.status == TransferStatus.DEPOSIT_PENDING: 
+      142 +            transfer.mark_deposit_confirmed()                 
+      143 +            TransferAuditLog.log(transfer, 'deposit_confirmed'
+          +, metadata=payload)                                           
+      144 +            logger.info("Deposit confirmed for %s, triggering 
+          +withdrawal", transfer.reference)                              
+      145 +                                                              
+      146 +            # Auto-trigger withdrawal phase                   
+      147 +            _trigger_withdrawal(transfer)                     
+      148 +                                                              
+      149 +    elif callback_status == 'failed':                         
+      150 +        if transfer.status == TransferStatus.DEPOSIT_PENDING: 
+      151 +            transfer.mark_deposit_failed(                     
+      152 +                message='Deposit failed via callback',        
+      153 +                code='DEPOSIT_CALLBACK_FAILED',               
+      154 +            )                                                 
+      155 +            TransferAuditLog.log(transfer, 'deposit_failed', m
+          +etadata=payload)                                              
+      156 +            logger.info("Deposit failed for %s", transfer.refe
+          +rence)                                                        
+      157 +                                                              
+      158 +    return JsonResponse({'success': True})                    
+      159 +                                                              
+      160 +                                                              
+      161 +@csrf_exempt                                                  
+      162 +@require_POST                                                 
+      163 +def awdpay_withdrawal_callback(request):                      
+      164 +    """Handle withdrawal (payout) status callbacks from AWDPay
+          +."""                                                          
+      165 +    try:                                                      
+      166          payload = json.loads(request.body)
+      167      except json.JSONDecodeError:
+      168          return JsonResponse({'error': 'Invalid JSON'}, status=
+           400)
+      169  
+       32 -    event = payload.get('event')                              
+       33 -    data = payload.get('data', {})                            
+       34 -    ref = data.get('reference_id')                            
+      170 +    logger.info("Withdrawal callback received: %s", payload)  
+      171  
+      172 +    ref, callback_status = _parse_callback(payload)           
+      173 +    if not ref or not callback_status:                        
+      174 +        logger.warning("Withdrawal callback: could not parse r
+          +eference/status from payload")                                
+      175 +        return JsonResponse({'error': 'Unrecognised callback f
+          +ormat'}, status=400)                                          
+      176 +                                                              
+      177      try:
+      178          transfer = Transfer.objects.get(reference=ref)
+      179      except Transfer.DoesNotExist:
+      180 +        logger.warning("Withdrawal callback: transfer not foun
+          +d for ref=%s", ref)                                           
+      181          return JsonResponse({'error': 'Transfer not found'}, s
+           tatus=404)
+      182  
+       41 -    TransferAuditLog.log(transfer, 'webhook_received', metadat
+          -a={'event': event, 'raw': data})                              
+      183 +    TransferAuditLog.log(                                     
+      184 +        transfer, 'webhook_received',                         
+      185 +        metadata={'phase': 'withdrawal', 'callback_status': ca
+          +llback_status, 'raw': payload},                               
+      186 +    )                                                         
+      187  
+       43 -    if event == 'transfer.completed':                         
+       44 -        transfer.mark_completed()                             
+       45 -        TransferAuditLog.log(transfer, 'completed', metadata=d
+          -ata)                                                          
+       46 -    elif event == 'transfer.failed':                          
+       47 -        transfer.mark_failed(                                 
+       48 -            data.get('error', 'Transfer failed'),             
+       49 -            code=data.get('error_code'),                      
+       50 -        )                                                     
+       51 -        TransferAuditLog.log(transfer, 'failed', metadata=data
+          -)                                                             
+       52 -    elif event == 'transfer.reversed':                        
+       53 -        transfer.status = TransferStatus.REVERSED             
+       54 -        transfer.save(update_fields=['status'])               
+       55 -        TransferAuditLog.log(transfer, 'webhook_processed', me
+          -tadata=data)                                                  
+      188 +    if callback_status == 'completed':                        
+      189 +        if transfer.status == TransferStatus.WITHDRAWAL_PENDIN
+          +G:                                                            
+      190 +            transfer.mark_completed()                         
+      191 +            TransferAuditLog.log(transfer, 'completed', metada
+          +ta=payload)                                                   
+      192 +            logger.info("Transfer %s completed successfully", 
+          +transfer.reference)                                           
+      193  
+      194 +    elif callback_status == 'failed':                         
+      195 +        if transfer.status == TransferStatus.WITHDRAWAL_PENDIN
+          +G:                                                            
+      196 +            transfer.mark_failed(                             
+      197 +                message='Withdrawal failed via callback',     
+      198 +                code='WITHDRAWAL_CALLBACK_FAILED',            
+      199 +            )                                                 
+      200 +            TransferAuditLog.log(transfer, 'withdrawal_failed'
+          +, metadata=payload)                                           
+      201 +            logger.info("Withdrawal failed for %s", transfer.r
+          +eference)                                                     
+      202 +                                                              
+      203      return JsonResponse({'success': True})
+
+● Step 8: Update URL Configuration
+
+● Read 1 file (ctrl+o to expand)
+
+● Update(config/urls.py)
+  ⎿  Added 1 line, removed 1 line
+       6  from django.conf import settings
+       7  from django.conf.urls.static import static
+       8  from rest_framework import permissions
+       9 -from apps.transfers.webhooks import awdpay_webhook             
+       9 +from apps.transfers.webhooks import awdpay_deposit_callback, aw
+         +dpay_withdrawal_callback                                       
+      10  # from drf_yasg.views import get_schema_view
+      11  # from drf_yasg import openapi
+      12  from drf_spectacular.views import SpectacularAPIView, Spectacul
+          arRedocView, SpectacularSwaggerView
+
+● Update(config/urls.py)
+  ⎿  Added 2 lines, removed 1 line
+      34      path('api/kyc/', include('apps.kyc.urls')),
+      35       path('api/routes/', include('apps.routes.urls')),
+      36      path('api/transfers/', include('apps.transfers.urls')),
+      37 -    path('webhooks/awdpay/', awdpay_webhook),                  
+      37 +    path('webhooks/awdpay/deposit/', awdpay_deposit_callback), 
+      38 +    path('webhooks/awdpay/withdrawal/', awdpay_withdrawal_callb
+         +ack),                                                          
+      39      
+      40      # API Documentation
+      41          # YOUR PATTERNS
+
+● Step 9: Update Django Admin
+
+● Write(apps/transfers/admin.py)
+  ⎿  Added 66 lines, removed 20 lines
+      13          'status_colored',
+      14          'amount',
+      15          'currency',
+      16 -        'recipient_name',                                      
+      16 +        'sender_phone',                                        
+      17          'recipient_phone',
+      18 +        'funding_mobile_provider',                             
+      19 +        'payout_mobile_provider',                              
+      20          'created_at',
+      21      ]
+      20 -    list_filter = ['status', 'currency', 'provider', 'created_a
+         -t']                                                            
+      22 +    list_filter = ['status', 'currency', 'funding_mobile_provid
+         +er', 'payout_mobile_provider', 'created_at']                   
+      23      search_fields = [
+      24          'reference',
+      25 +        'deposit_reference',                                   
+      26 +        'withdrawal_reference',                                
+      27          'user__email',
+      28 +        'sender_phone',                                        
+      29 +        'sender_name',                                         
+      30          'recipient_name',
+      31          'recipient_phone',
+      32          'provider_id',
+     ...
+      35          'id',
+      36          'reference',
+      37          'provider_id',
+      38 +        'deposit_reference',                                   
+      39 +        'deposit_status',                                      
+      40 +        'deposit_gateway',                                     
+      41 +        'deposit_initiated_at',                                
+      42 +        'deposit_confirmed_at',                                
+      43 +        'withdrawal_reference',                                
+      44 +        'withdrawal_status',                                   
+      45 +        'withdrawal_gateway',                                  
+      46 +        'withdrawal_initiated_at',                             
+      47 +        'withdrawal_confirmed_at',                             
+      48          'created_at',
+      49          'updated_at',
+      50          'completed_at',
+      51      ]
+      52      ordering = ['-created_at']
+      37 -                                                               
+      53 +                                                               
+      54      fieldsets = (
+      55          ('Transfer Info', {
+      56              'fields': (
+     ...
+      61                  'corridor',
+      62              )
+      63          }),
+      48 -        ('Amount Details', {                                   
+      64 +        ('Sender', {                                           
+      65              'fields': (
+      50 -                'amount',                                      
+      51 -                'currency',                                    
+      52 -                'service_fee',                                 
+      53 -                'total_amount',                                
+      66 +                'sender_name',                                 
+      67 +                'sender_phone',                                
+      68 +                'sender_email',                                
+      69 +                'funding_mobile_provider',                     
+      70              )
+      71          }),
+      72          ('Recipient', {
+     ...
+       74                  'recipient_name',
+       75                  'recipient_phone',
+       76                  'recipient_email',
+       77 +                'payout_mobile_provider',                     
+       78              )
+       79          }),
+       63 -        ('Payment Methods', {                                 
+       80 +        ('Source Amount', {                                   
+       81              'fields': (
+       65 -                'funding_method_type',                        
+       66 -                'funding_mobile_provider',                    
+       67 -                'funding_card_scheme',                        
+       68 -                'payout_method_type',                         
+       69 -                'payout_mobile_provider',                     
+       82 +                'amount',                                     
+       83 +                'currency',                                   
+       84 +                'service_fee',                                
+       85 +                'total_amount',                               
+       86              )
+       87          }),
+       88 +        ('Destination Amount', {                              
+       89 +            'fields': (                                       
+       90 +                'destination_amount',                         
+       91 +                'destination_currency',                       
+       92 +            )                                                 
+       93 +        }),                                                   
+       94 +        ('Deposit Phase (AWDPay)', {                          
+       95 +            'fields': (                                       
+       96 +                'deposit_reference',                          
+       97 +                'deposit_status',                             
+       98 +                'deposit_gateway',                            
+       99 +                'deposit_initiated_at',                       
+      100 +                'deposit_confirmed_at',                       
+      101 +            ),                                                
+      102 +            'classes': ('collapse',),                         
+      103 +        }),                                                   
+      104 +        ('Withdrawal Phase (AWDPay)', {                       
+      105 +            'fields': (                                       
+      106 +                'withdrawal_reference',                       
+      107 +                'withdrawal_status',                          
+      108 +                'withdrawal_gateway',                         
+      109 +                'withdrawal_initiated_at',                    
+      110 +                'withdrawal_confirmed_at',                    
+      111 +            ),                                                
+      112 +            'classes': ('collapse',),                         
+      113 +        }),                                                   
+      114          ('Provider', {
+      115              'fields': (
+      116                  'provider',
+     ...
+      133              )
+      134          }),
+      135      )
+       94 -                                                              
+      136 +                                                              
+      137      def status_colored(self, obj):
+      138          colors = {
+      139              'pending': 'orange',
+      140 +            'deposit_pending': '#2196F3',                     
+      141 +            'deposit_confirmed': '#4CAF50',                   
+      142 +            'deposit_failed': '#f44336',                      
+      143 +            'withdrawal_pending': '#FF9800',                  
+      144              'processing': 'blue',
+      145              'completed': 'green',
+      146              'failed': 'red',
+     ...
+      188      list_filter = ['event', 'created_at']
+      189      search_fields = [
+      190          'transfer__reference',
+      191 +        'transfer__deposit_reference',                        
+      192 +        'transfer__withdrawal_reference',                     
+      193          'transfer__user__email',
+      194      ]
+      195      readonly_fields = [
+     ...
+      200          'created_at',
+      201      ]
+      202      ordering = ['-created_at']
+      155 -                                                              
+      203 +                                                              
+      204      def transfer_reference(self, obj):
+      205          return obj.transfer.reference
+      206      transfer_reference.short_description = 'Transfer'
+      207      transfer_reference.admin_order_field = 'transfer__referenc
+           e'
+      160 -                                                              
+      208 +                                                              
+      209      def has_add_permission(self, request):
+      162 -        """Prevent manual creation"""                         
+      210          return False
+      164 -                                                              
+      211 +                                                              
+      212      def has_delete_permission(self, request, obj=None):
+      166 -        """Prevent deletion for audit purposes"""             
+      213          return False
+
+● Step 10: Run Migrations
+
+● First, let me check the existing migrations and the manage.py location.
+
+● Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+● Let me check how settings are configured to find the right settings module for
+   migrations:
+
+● Searched for 2 patterns, read 3 files (ctrl+o to expand)
+
+● Now let me run makemigrations. The .env has DJANGO_ENV=developments (with an
+  's') which would fall into the else branch (development). Let me try:
+
+● Bash(python manage.py makemigrations transfers 2>&1)
+  ⎿  Error: Exit code 1
+     Traceback (most recent call last):
+       File "/usr/lib/python3/dist-packages/django/core/management/base.py", 
+     line 412, in run_from_argv
+         self.execute(*args, **cmd_options)
+         ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+       File "/usr/lib/python3/dist-packages/django/core/management/base.py", 
+     line 453, in execute
+         self.check()
+         ~~~~~~~~~~^^
+       File "/usr/lib/python3/dist-packages/django/core/management/base.py", 
+     line 485, in check
+         all_issues = checks.run_checks(
+     … +87 lines (ctrl+o to see all)
+
+● There's no virtual environment active. Let me check for one:
+
+● Read 1 file (ctrl+o to expand)
+
+● Bash(/home/fils/Documents/projects/chic_transfer/chic-transfer-api/env/bin/pyt
+      hon
+      /home/fils/Documents/projects/chic_transfer/chic-transfer-api/manage.py
+      makemigrati…)
+  ⎿  Error: Exit code 1
+     SystemCheckError: System check identified some issues:
+
+     ERRORS:
+     transfers.Transfer.corridor: (fields.E304) Reverse accessor 
+     'Corridor.transfers' for 'transfers.Transfer.corridor' clashes with reverse
+      accessor for 'transfers.TransferLimitSnapshot.corridor'.
+        HINT: Add or change a related_name argument to the definition for 
+     'transfers.Transfer.corridor' or 
+     'transfers.TransferLimitSnapshot.corridor'.
+     transfers.Transfer.corridor: (fields.E305) Reverse query name for 
+     'transfers.Transfer.corridor' clashes with reverse query name for 
+     'transfers.TransferLimitSnapshot.corridor'.
+        HINT: Add or change a related_name argument to the definition for 
+     'transfers.Transfer.corridor' or 
+     'transfers.TransferLimitSnapshot.corridor'.
+     transfers.TransferLimitSnapshot.corridor: (fields.E304) Reverse accessor 
+     'Corridor.transfers' for 'transfers.TransferLimitSnapshot.corridor' clashes
+      with reverse accessor for 'transfers.Transfer.corridor'.
+        HINT: Add or change a related_name argument to the definition for 
+     'transfers.TransferLimitSnapshot.corridor' or 
+     'transfers.Transfer.corridor'.
+     … +3 lines (ctrl+o to see all)
+
+● Both Transfer.corridor and TransferLimitSnapshot.corridor use
+  related_name='transfers'. Let me fix the conflict:
+
+● Read 1 file (ctrl+o to expand)
+
+● Update(apps/transfers/models.py)
+  ⎿  Added 1 line, removed 1 line
+      78      corridor = models.ForeignKey(
+      79          Corridor,
+      80          on_delete=models.PROTECT,
+      81 -        related_name='transfers',                              
+      81 +        related_name='corridor_transfers',                     
+      82          null=True,
+      83          blank=True,
+      84          help_text="Source -> destination corridor used for this
+           transfer.",
+
+● Also fix the existing TransferLimitSnapshot.corridor related_name:
+
+● Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+● Line 273 is in TransferLimitSnapshot. Let me read that area:
+
+● Read 1 file (ctrl+o to expand)
+
+● Update(apps/transfers/models.py)
+  ⎿  Added 1 line, removed 1 line
+      270      corridor = models.ForeignKey(
+      271          Corridor,
+      272          on_delete=models.PROTECT,
+      273 -        related_name='transfers',                             
+      273 +        related_name='limit_snapshots',                       
+      274          null=True,
+      275          blank=True,
+      276          help_text="Source → destination corridor used for this
+            transfer.",
+
+● Now run makemigrations again:
+
+● Bash(/home/fils/Documents/projects/chic_transfer/chic-transfer-api/env/bin/pyt
+      hon
+      /home/fils/Documents/projects/chic_transfer/chic-transfer-api/manage.py
+      makemigrati…)
+  ⎿  env developments
+     Migrations for 'transfers':
+       apps/transfers/migrations/0003_transfer_corridor_transfer_deposit_co
+     … +17 lines (ctrl+o to expand)
+
+● Migration created. Now let me run migrate:
+
+● Bash(/home/fils/Documents/projects/chic_transfer/chic-transfer-api/env/bin/pyt
+      hon
+      /home/fils/Documents/projects/chic_transfer/chic-transfer-api/manage.py
+      migrate 2>&…)
+  ⎿  env developments
+     Operations to perform:
+       Apply all migrations: admin, auth, authentication, contenttypes, kyc
+     … +4 lines (ctrl+o to expand)
+  ⎿  (timeout 30s)
+
+● Now let me verify the server starts:
+
+● Bash(/home/fils/Documents/projects/chic_transfer/chic-transfer-api/env/bin/pyt
+      hon
+      /home/fils/Documents/projects/chic_transfer/chic-transfer-api/manage.py
+      check 2>&1)
+  ⎿  env developments
+     System check identified no issues (0 silenced).
+
+● All checks pass. Let me mark the task complete.
+
+● All 10 steps are complete. Here's a summary of everything implemented:
+
+  Summary of Changes
+
+  1. config/settings/base.py - Updated AWDPay settings
+
+  Replaced static API key settings with OAuth2/Keycloak settings:
+  AWDPAY_BASE_URL, AWDPAY_API_VERSION, AWDPAY_KEYCLOAK_BASE_URL,
+  AWDPAY_KEYCLOAK_REALM, AWDPAY_KEYCLOAK_CLIENT_ID,
+  AWDPAY_KEYCLOAK_CLIENT_SECRET, AWDPAY_CALLBACK_BASE_URL.
+
+  2. apps/integrations/gateway_mapping.py - NEW file
+
+  Maps internal MobileMoneyProvider codes (e.g. mtn_cm, wave_ci) to AWDPay
+  gateway names, country ISO codes, and currencies.
+
+  3. apps/integrations/awdpay.py - Full rewrite
+
+  - OAuth2 token management via Keycloak client_credentials grant
+  - In-memory token caching with auto-refresh 60s before expiry
+  - Methods: initiate_deposit(), initiate_withdrawal(), get_deposit_status(),
+  get_withdrawal_status(), list_deposit_gateways(), list_withdrawal_gateways(),
+  get_wallet_balance()
+  - Custom exceptions: AWDPayTokenError, AWDPayAPIError
+
+  4. apps/transfers/models.py - Updated Transfer model
+
+  - New TransferStatus choices: DEPOSIT_PENDING, DEPOSIT_CONFIRMED,
+  DEPOSIT_FAILED, WITHDRAWAL_PENDING
+  - Added XOF to Currency choices
+  - New fields: sender info (sender_phone, sender_name, sender_email), providers
+   (funding_mobile_provider, payout_mobile_provider), corridor FK, destination
+  amount/currency, deposit tracking (deposit_reference, deposit_status,
+  deposit_gateway, deposit_initiated_at, deposit_confirmed_at), withdrawal
+  tracking (withdrawal_reference, withdrawal_status, withdrawal_gateway,
+  withdrawal_initiated_at, withdrawal_confirmed_at)
+  - State machine helpers: mark_deposit_pending(), mark_deposit_confirmed(),
+  mark_deposit_failed(), mark_withdrawal_pending(), updated mark_completed()
+
+  5. apps/transfers/serializers.py - Rewritten
+
+  - CreateTransferSerializer: Takes sender_phone, sender_name, funding_provider,
+   payout_provider; validates corridor exists; computes corridor-based fee;
+  validates gateway mappings
+  - TransferSerializer / TransferHistorySerializer: Include all new two-phase
+  fields
+
+  6. apps/transfers/views.py - Rewritten CreateTransferView
+
+  - Creates transfer with full sender+receiver info
+  - Calls initiate_deposit() (phase 1)
+  - Returns immediately with USSD prompt instructions
+
+  7. apps/transfers/webhooks.py - Full rewrite
+
+  - awdpay_deposit_callback() - Handles deposit status callbacks (PayDunya + MTN
+   format)
+  - awdpay_withdrawal_callback() - Handles withdrawal status callbacks
+  - When deposit completes, automatically triggers _trigger_withdrawal()
+
+  8. config/urls.py - Updated routes
+
+  - webhooks/awdpay/deposit/ and webhooks/awdpay/withdrawal/
+
+  9. apps/transfers/admin.py - Updated admin
+
+  - Fieldsets for deposit and withdrawal phases (collapsible)
+  - Search by deposit/withdrawal references
+  - Color-coded status for all new states
+
+  10. Migration applied successfully
+
+  - 0003_transfer_corridor_transfer_deposit_confirmed_at_and_more - all new
+  fields added, indexes created, django check passes with 0 issues.
+
+✻ Worked for 11m 5s
+
+❯ the mobile app for this project is found in                               
+  /home/fils/Documents/projects/chic_transfer/my-bank make it to use the    
+  updates effectively                                                       
+
+● Let me explore the mobile app codebase first to understand its structure and
+  how it currently interacts with the API.
+
+● Explore(Explore mobile app codebase)
+  ⎿  Done (34 tool uses · 72.2k tokens · 2m 1s)
+
+● Good, I have a thorough understanding of the mobile app. Now let me read all
+  the key files that need updating.
+
+● Read 6 files (ctrl+o to expand)
+
+● Now I have the full picture. Let me create tasks and implement the changes.
+  The key updates needed are:
+
+  1. Types - Add new status values, new fields (sender, deposit/withdrawal
+  phases, providers)
+  2. Transfer service - Update CreateTransferPayload with new fields
+  3. Transfer screen - Send sender_phone, sender_name, funding_provider,
+  payout_provider
+  4. Transfer result screen - Show two-phase status info (deposit pending, USSD
+  prompt message)
+  5. History screen - Handle new status values and show provider info
+
+● Now let me implement all the changes. Starting with types (the foundation for
+  everything else):
+
+● Write(~/Documents/projects/chic_transfer/my-bank/types/transfers.ts)
+  ⎿  Added 49 lines, removed 2 lines
+       1  
+       2  // types/transfers.ts
+       3  
+       4 +export type TransferStatus =                                   
+       5 +  | 'pending'                                                  
+       6 +  | 'deposit_pending'                                          
+       7 +  | 'deposit_confirmed'                                        
+       8 +  | 'deposit_failed'                                           
+       9 +  | 'withdrawal_pending'                                       
+      10 +  | 'processing'                                               
+      11 +  | 'completed'                                                
+      12 +  | 'failed'                                                   
+      13 +  | 'cancelled'                                                
+      14 +  | 'reversed';                                                
+      15 +                                                               
+      16  export interface CreateTransferPayload {
+      17 +  sender_phone: string;                                        
+      18 +  sender_name: string;                                         
+      19    recipient_name: string;
+      20    recipient_phone: string;
+      21    recipient_email?: string;
+      22    amount: number;
+      23    currency: string;
+      24    description?: string;
+      25 +  funding_provider: string;                                    
+      26 +  payout_provider: string;                                     
+      27    device_id: string;
+      28  }
+      29  
+      30  export interface Transfer {
+      31    id: string;
+      16 -  status: 'pending' | 'processing' | 'completed' | 'failed' | '
+         -cancelled' | 'reversed';                                       
+      32 +  status: TransferStatus;                                      
+      33    status_display: string;
+      34 +  // Sender                                                    
+      35 +  sender_phone: string;                                        
+      36 +  sender_name: string;                                         
+      37 +  sender_email: string;                                        
+      38 +  funding_mobile_provider: string;                             
+      39 +  // Source amount                                             
+      40    amount: string;
+      41    currency: string;
+      42    service_fee: string;
+      43    total_amount: string;
+      44 +  // Destination amount                                        
+      45 +  destination_amount: string | null;                           
+      46 +  destination_currency: string;                                
+      47 +  // Payout                                                    
+      48 +  payout_mobile_provider: string;                              
+      49 +  // Recipient                                                 
+      50    recipient_name: string;
+      51    recipient_phone: string;
+      52    recipient_email: string;
+      53 +  // Reference                                                 
+      54    reference: string;
+      55    provider: string;
+      56    provider_id: string;
+      57 +  // Deposit phase                                             
+      58 +  deposit_reference: string;                                   
+      59 +  deposit_status: string;                                      
+      60 +  deposit_gateway: string;                                     
+      61 +  deposit_initiated_at: string | null;                         
+      62 +  deposit_confirmed_at: string | null;                         
+      63 +  // Withdrawal phase                                          
+      64 +  withdrawal_reference: string;                                
+      65 +  withdrawal_status: string;                                   
+      66 +  withdrawal_gateway: string;                                  
+      67 +  withdrawal_initiated_at: string | null;                      
+      68 +  withdrawal_confirmed_at: string | null;                      
+      69 +  // Other                                                     
+      70    description: string;
+      71    created_at: string;
+      72    completed_at: string | null;
+     ...
+      84  
+      85  export interface TransferHistoryItem {
+      86    id: string;
+      45 -  status: 'pending' | 'processing' | 'completed' | 'failed' | '
+         -cancelled' | 'reversed';                                       
+      87 +  status: TransferStatus;                                      
+      88    status_display: string;
+      89    amount: string;
+      90    currency: string;
+      91 +  destination_amount: string | null;                           
+      92 +  destination_currency: string;                                
+      93 +  funding_mobile_provider: string;                             
+      94 +  payout_mobile_provider: string;                              
+      95 +  sender_phone: string;                                        
+      96    recipient_name: string;
+      97    recipient_phone: string;
+      98    created_at: string;
+
+● Now update the transfer creation screen to send the new fields:
+
+● The key change is in the handleSendMoney function's payload - I need to add
+  sender_phone, sender_name, funding_provider, and payout_provider:
+
+● Read 1 file (ctrl+o to expand)
+
+● Update(~/Documents/projects/chic_transfer/my-bank/app/(tabs)/index.tsx)
+  ⎿  Added 6 lines, removed 4 lines
+      267      }
+      268  
+      269      const payload = {
+      270 +      sender_phone: senderPhoneNumber,                        
+      271 +      sender_name: user?.full_name || user?.first_name || "", 
+      272        recipient_name: recipientName,
+      273        recipient_phone: payoutPhoneNumber,
+      272 -      amount: parseFloat(amount), // Send as float/number     
+      273 -      currency: "XAF", // Default to XAF if not found         
+      274 -      // currency: selectedDestination?.currency || "XAF", // 
+          -Default to XAF if not found                                   
+      274 +      amount: parseFloat(amount),                             
+      275 +      currency: "XAF",                                        
+      276        description: description,
+      277 +      funding_provider: selectedFundingMethod!.mobile_provider
+          +,                                                             
+      278 +      payout_provider: selectedPayoutMethod!.mobile_provider, 
+      279        device_id: deviceId,
+      277 -      // recipient_email is optional and not collected in UI f
+          -or now                                                        
+      280      };
+      281      
+      282      try {
+
+● Now let me check what user fields are available (to make sure full_name or
+  first_name exists):
+
+● Searched for 1 pattern, read 1 file (ctrl+o to expand)
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+● Good, User has full_name. Let me fix the reference to use only full_name:
+
+● Update(~/Documents/projects/chic_transfer/my-bank/app/(tabs)/index.tsx)
+  ⎿  Added 1 line, removed 1 line
+      268  
+      269      const payload = {
+      270        sender_phone: senderPhoneNumber,
+      271 -      sender_name: user?.full_name || user?.first_name || "", 
+      271 +      sender_name: user?.full_name || "",                     
+      272        recipient_name: recipientName,
+      273        recipient_phone: payoutPhoneNumber,
+      274        amount: parseFloat(amount),
+
+● Now update the transfer result screen to handle the two-phase statuses:
+
+● Write(~/Documents/projects/chic_transfer/my-bank/app/transfer-result.tsx)
+  ⎿  Added 203 lines, removed 58 lines
+        1 -import React, { useEffect, useState } from 'react';           
+        1 +import React, { useEffect, useState, useCallback } from 'react
+          +';                                                            
+        2  import { View, Text, ActivityIndicator, TouchableOpacity, Scro
+           llView } from 'react-native';
+        3  import { SafeAreaView } from 'react-native-safe-area-context';
+        4  import { Stack, useLocalSearchParams, useRouter } from 'expo-r
+           outer';
+        5 -import { CheckCircle2, XCircle, Loader2 } from 'lucide-react-n
+          -ative';                                                       
+        6 -import  transferService  from '@/services/transactionService';
+        7 -import { Transfer } from '@/types/transfers';                 
+        8 -// import moment from 'moment';                               
+        5 +import { CheckCircle2, XCircle, Loader2, Smartphone, ArrowDown
+          + } from 'lucide-react-native';                                
+        6 +import transferService from '@/services/transactionService';  
+        7 +import { Transfer, TransferStatus } from '@/types/transfers'; 
+        8  
+        9 +const POLLING_INTERVAL = 5000; // 5 seconds                   
+       10 +                                                              
+       11 +function getStatusInfo(status: TransferStatus) {              
+       12 +  switch (status) {                                           
+       13 +    case 'completed':                                         
+       14 +      return {                                                
+       15 +        icon: <CheckCircle2 size={60} color="green" />,       
+       16 +        message: 'Transfer Completed!',                       
+       17 +        description: 'Money has been delivered to the recipien
+          +t.',                                                          
+       18 +        color: 'text-green-500',                              
+       19 +        bgColor: 'bg-green-50',                               
+       20 +      };                                                      
+       21 +    case 'deposit_pending':                                   
+       22 +      return {                                                
+       23 +        icon: <Smartphone size={60} color="#2196F3" />,       
+       24 +        message: 'Confirm on Your Phone',                     
+       25 +        description: 'A USSD prompt has been sent to your phon
+          +e. Please confirm the payment on your mobile device.',        
+       26 +        color: 'text-blue-500',                               
+       27 +        bgColor: 'bg-blue-50',                                
+       28 +      };                                                      
+       29 +    case 'deposit_confirmed':                                 
+       30 +      return {                                                
+       31 +        icon: <Loader2 size={60} color="orange" />,           
+       32 +        message: 'Payment Received',                          
+       33 +        description: 'Your payment has been received. Sending 
+          +money to the recipient...',                                   
+       34 +        color: 'text-orange-500',                             
+       35 +        bgColor: 'bg-orange-50',                              
+       36 +      };                                                      
+       37 +    case 'withdrawal_pending':                                
+       38 +      return {                                                
+       39 +        icon: <Loader2 size={60} color="orange" />,           
+       40 +        message: 'Sending to Recipient...',                   
+       41 +        description: 'Money is being sent to the recipient. Th
+          +is may take a moment.',                                       
+       42 +        color: 'text-orange-500',                             
+       43 +        bgColor: 'bg-orange-50',                              
+       44 +      };                                                      
+       45 +    case 'deposit_failed':                                    
+       46 +      return {                                                
+       47 +        icon: <XCircle size={60} color="red" />,              
+       48 +        message: 'Payment Failed',                            
+       49 +        description: 'The payment from your account was not co
+          +mpleted. No money was charged.',                              
+       50 +        color: 'text-red-500',                                
+       51 +        bgColor: 'bg-red-50',                                 
+       52 +      };                                                      
+       53 +    case 'failed':                                            
+       54 +      return {                                                
+       55 +        icon: <XCircle size={60} color="red" />,              
+       56 +        message: 'Transfer Failed',                           
+       57 +        description: 'Something went wrong with this transfer.
+          +',                                                            
+       58 +        color: 'text-red-500',                                
+       59 +        bgColor: 'bg-red-50',                                 
+       60 +      };                                                      
+       61 +    case 'pending':                                           
+       62 +    case 'processing':                                        
+       63 +      return {                                                
+       64 +        icon: <Loader2 size={60} color="orange" />,           
+       65 +        message: 'Transfer in Progress...',                   
+       66 +        description: 'Your transfer is being processed.',     
+       67 +        color: 'text-orange-500',                             
+       68 +        bgColor: 'bg-orange-50',                              
+       69 +      };                                                      
+       70 +    case 'cancelled':                                         
+       71 +      return {                                                
+       72 +        icon: <XCircle size={60} color="gray" />,             
+       73 +        message: 'Transfer Cancelled',                        
+       74 +        description: 'This transfer was cancelled.',          
+       75 +        color: 'text-gray-500',                               
+       76 +        bgColor: 'bg-gray-50',                                
+       77 +      };                                                      
+       78 +    case 'reversed':                                          
+       79 +      return {                                                
+       80 +        icon: <XCircle size={60} color="purple" />,           
+       81 +        message: 'Transfer Reversed',                         
+       82 +        description: 'This transfer has been reversed.',      
+       83 +        color: 'text-purple-500',                             
+       84 +        bgColor: 'bg-purple-50',                              
+       85 +      };                                                      
+       86 +    default:                                                  
+       87 +      return {                                                
+       88 +        icon: <Loader2 size={60} color="orange" />,           
+       89 +        message: 'Processing...',                             
+       90 +        description: '',                                      
+       91 +        color: 'text-orange-500',                             
+       92 +        bgColor: 'bg-orange-50',                              
+       93 +      };                                                      
+       94 +  }                                                           
+       95 +}                                                             
+       96 +                                                              
+       97 +const ACTIVE_STATUSES: TransferStatus[] = [                   
+       98 +  'pending',                                                  
+       99 +  'deposit_pending',                                          
+      100 +  'deposit_confirmed',                                        
+      101 +  'withdrawal_pending',                                       
+      102 +  'processing',                                               
+      103 +];                                                            
+      104 +                                                              
+      105  export default function TransferResultScreen() {
+      106    const router = useRouter();
+      107    const { transferId, status: initialStatus } = useLocalSearch
+           Params();
+     ...
+      109    const [loading, setLoading] = useState(true);
+      110    const [error, setError] = useState<string | null>(null);
+      111  
+       17 -  useEffect(() => {                                           
+       18 -    if (transferId) {                                         
+       19 -      fetchTransferDetails(transferId as string);             
+       20 -    } else {                                                  
+       21 -      setError("No transfer ID provided.");                   
+       22 -      setLoading(false);                                      
+       23 -    }                                                         
+       24 -  }, [transferId]);                                           
+       25 -                                                              
+       26 -  const fetchTransferDetails = async (id: string) => {        
+      112 +  const fetchTransferDetails = useCallback(async (id: string) 
+          +=> {                                                          
+      113      try {
+       28 -      setLoading(true);                                       
+      114        const response = await transferService.getTransferDetail
+           s(id);
+      115        if (response.success) {
+      116          setTransfer(response.data);
+     ...
+      122      } finally {
+      123        setLoading(false);
+      124      }
+       40 -  };                                                          
+      125 +  }, []);                                                     
+      126  
+       42 -  const isSuccess = transfer?.status === 'completed';         
+       43 -  const isPending = transfer?.status === 'pending' || transfer
+          -?.status === 'processing';                                    
+       44 -  const isFailed = transfer?.status === 'failed' || transfer?.
+          -status === 'cancelled' || transfer?.status === 'reversed';    
+      127 +  // Initial fetch                                            
+      128 +  useEffect(() => {                                           
+      129 +    if (transferId) {                                         
+      130 +      fetchTransferDetails(transferId as string);             
+      131 +    } else {                                                  
+      132 +      setError("No transfer ID provided.");                   
+      133 +      setLoading(false);                                      
+      134 +    }                                                         
+      135 +  }, [transferId]);                                           
+      136  
+       46 -  const statusColor = isSuccess ? 'text-green-500' : isFailed 
+          -? 'text-red-500' : 'text-orange-500';                         
+       47 -  const icon = isSuccess ? <CheckCircle2 size={60} color="gree
+          -n" /> : isFailed ? <XCircle size={60} color="red" /> : <Loader
+          -2 size={60} color="orange" />;                                
+       48 -  const message = isSuccess ? 'Transfer Completed!' : isFailed
+          - ? 'Transfer Failed' : 'Transfer in Progress...';             
+      137 +  // Poll for status updates while transfer is in an active st
+          +ate                                                           
+      138 +  useEffect(() => {                                           
+      139 +    if (!transfer || !transferId) return;                     
+      140 +    if (!ACTIVE_STATUSES.includes(transfer.status)) return;   
+      141  
+      142 +    const interval = setInterval(() => {                      
+      143 +      fetchTransferDetails(transferId as string);             
+      144 +    }, POLLING_INTERVAL);                                     
+      145 +                                                              
+      146 +    return () => clearInterval(interval);                     
+      147 +  }, [transfer?.status, transferId]);                         
+      148 +                                                              
+      149 +  const statusInfo = transfer ? getStatusInfo(transfer.status)
+          + : null;                                                      
+      150 +  const isTerminal = transfer && !ACTIVE_STATUSES.includes(tra
+          +nsfer.status);                                                
+      151 +                                                              
+      152    return (
+      153      <SafeAreaView className="flex-1 bg-white">
+      154        <Stack.Screen options={{ headerShown: false }} />
+     ...
+      164              <Text className="mt-4 text-xl font-bold text-red-5
+           00">Error</Text>
+      165              <Text className="text-center text-gray-600">{error
+           }</Text>
+      166            </View>
+       65 -        ) : (                                                 
+      167 +        ) : transfer && statusInfo ? (                        
+      168            <View className="w-full max-w-md bg-white rounded-lg
+            p-6 shadow-md">
+      169 +            {/* Status Icon & Message */}                     
+      170              <View className="items-center justify-center mb-6"
+           >
+       68 -              {icon}                                          
+       69 -              <Text className={`mt-4 text-2xl font-bold ${stat
+          -usColor}`}>                                                   
+       70 -                {message}                                     
+      171 +              {statusInfo.icon}                               
+      172 +              <Text className={`mt-4 text-2xl font-bold ${stat
+          +usInfo.color}`}>                                              
+      173 +                {statusInfo.message}                          
+      174                </Text>
+       72 -              {transfer?.error_message && isFailed && (       
+      175 +              <Text className="text-gray-500 text-center mt-2 
+          +px-4">                                                        
+      176 +                {statusInfo.description}                      
+      177 +              </Text>                                         
+      178 +              {transfer.error_message && (transfer.status === 
+          +'failed' || transfer.status === 'deposit_failed') && (        
+      179                  <Text className="text-red-400 text-center mt-2
+           ">{transfer.error_message}</Text>
+      180                )}
+      181              </View>
+      182  
+       77 -            {transfer && (                                    
+       78 -              <View className="border-t border-gray-200 pt-4">
+       79 -                <Text className="text-lg font-semibold text-gr
+          -ay-800 mb-2">Transfer Details</Text>                          
+       80 -                <View className="flex-row justify-between py-1
+          -">                                                            
+       81 -                  <Text className="text-gray-600">Reference:</
+          -Text>                                                         
+       82 -                  <Text className="font-medium text-gray-900">
+          -{transfer.reference}</Text>                                   
+       83 -                </View>                                       
+       84 -                <View className="flex-row justify-between py-1
+          -">                                                            
+       85 -                  <Text className="text-gray-600">Recipient:</
+          -Text>                                                         
+       86 -                  <Text className="font-medium text-gray-900">
+          -{transfer.recipient_name} ({transfer.recipient_phone})</Text> 
+       87 -                </View>                                       
+       88 -                <View className="flex-row justify-between py-1
+          -">                                                            
+       89 -                  <Text className="text-gray-600">Amount Sent:
+          -</Text>                                                       
+       90 -                  <Text className="font-medium text-gray-900">
+          -{transfer.amount} {transfer.currency}</Text>                  
+       91 -                </View>                                       
+       92 -                <View className="flex-row justify-between py-1
+          -">                                                            
+       93 -                  <Text className="text-gray-600">Total Charge
+          -d:</Text>                                                     
+       94 -                  <Text className="font-medium text-gray-900">
+          -{transfer.total_amount} {transfer.currency}</Text>            
+       95 -                </View>                                       
+       96 -                <View className="flex-row justify-between py-1
+          -">                                                            
+       97 -                  <Text className="text-gray-600">Date:</Text>
+       98 -                  {/* <Text className="font-medium text-gray-9
+          -00">{moment(transfer.created_at).format('LLL')}</Text> */}    
+       99 -                </View>                                       
+      100 -                {transfer.completed_at && (                   
+      101 -                  <View className="flex-row justify-between py
+          --1">                                                          
+      102 -                    <Text className="text-gray-600">Completed 
+          -At:</Text>                                                    
+      103 -                    {/* <Text className="font-medium text-gray
+          --900">{moment(transfer.completed_at).format('LLL')}</Text> */}
+      104 -                  </View>                                     
+      105 -                )}                                            
+      183 +            {/* Transfer Progress Steps */}                   
+      184 +            {transfer.status !== 'pending' && (               
+      185 +              <View className="mb-4 px-4">                    
+      186 +                <ProgressStep                                 
+      187 +                  label="Payment Initiated"                   
+      188 +                  done={!!transfer.deposit_initiated_at}      
+      189 +                  active={transfer.status === 'deposit_pending
+          +'}                                                            
+      190 +                />                                            
+      191 +                <StepConnector />                             
+      192 +                <ProgressStep                                 
+      193 +                  label="Payment Confirmed"                   
+      194 +                  done={!!transfer.deposit_confirmed_at}      
+      195 +                  active={transfer.status === 'deposit_confirm
+          +ed'}                                                          
+      196 +                />                                            
+      197 +                <StepConnector />                             
+      198 +                <ProgressStep                                 
+      199 +                  label="Sending to Recipient"                
+      200 +                  done={!!transfer.withdrawal_initiated_at}   
+      201 +                  active={transfer.status === 'withdrawal_pend
+          +ing'}                                                         
+      202 +                />                                            
+      203 +                <StepConnector />                             
+      204 +                <ProgressStep                                 
+      205 +                  label="Delivered"                           
+      206 +                  done={transfer.status === 'completed'}      
+      207 +                  active={false}                              
+      208 +                />                                            
+      209                </View>
+      210              )}
+      211  
+      212 +            {/* Transfer Details */}                          
+      213 +            <View className="border-t border-gray-200 pt-4">  
+      214 +              <Text className="text-lg font-semibold text-gray
+          +-800 mb-2">Transfer Details</Text>                            
+      215 +              <DetailRow label="Reference" value={transfer.ref
+          +erence} />                                                    
+      216 +              <DetailRow label="Sender" value={`${transfer.sen
+          +der_name} (${transfer.sender_phone})`} />                     
+      217 +              <DetailRow label="Recipient" value={`${transfer.
+          +recipient_name} (${transfer.recipient_phone})`} />            
+      218 +              <DetailRow label="Amount Sent" value={`${transfe
+          +r.amount} ${transfer.currency}`} />                           
+      219 +              <DetailRow label="Fee" value={`${transfer.servic
+          +e_fee} ${transfer.currency}`} />                              
+      220 +              <DetailRow label="Total Charged" value={`${trans
+          +fer.total_amount} ${transfer.currency}`} />                   
+      221 +              {transfer.destination_amount && transfer.destina
+          +tion_currency && (                                            
+      222 +                <DetailRow label="Recipient Gets" value={`${tr
+          +ansfer.destination_amount} ${transfer.destination_currency}`} 
+          +/>                                                            
+      223 +              )}                                              
+      224 +              <DetailRow label="Status" value={transfer.status
+          +_display} />                                                  
+      225 +            </View>                                           
+      226 +                                                              
+      227 +            {/* Action Buttons */}                            
+      228              <View className="mt-8">
+      229                <TouchableOpacity
+      230                  className="bg-blue-600 px-5 py-3 rounded-lg fl
+           ex-row items-center justify-center mb-3"
+     ...
+      240                </TouchableOpacity>
+      241              </View>
+      242            </View>
+      124 -        )}                                                    
+      243 +        ) : null}                                             
+      244        </ScrollView>
+      245      </SafeAreaView>
+      246    );
+      247  }
+      248 +                                                              
+      249 +function ProgressStep({ label, done, active }: { label: string
+          +; done: boolean; active: boolean }) {                         
+      250 +  const bgColor = done ? 'bg-green-500' : active ? 'bg-blue-50
+          +0' : 'bg-gray-300';                                           
+      251 +  const textColor = done ? 'text-green-700' : active ? 'text-b
+          +lue-700' : 'text-gray-400';                                   
+      252 +                                                              
+      253 +  return (                                                    
+      254 +    <View className="flex-row items-center">                  
+      255 +      <View className={`w-4 h-4 rounded-full ${bgColor} mr-3`}
+          + />                                                           
+      256 +      <Text className={`text-base font-medium ${textColor}`}>{
+          +label}</Text>                                                 
+      257 +      {active && <ActivityIndicator size="small" color="#3B82F
+          +6" style={{ marginLeft: 8 }} />}                              
+      258 +    </View>                                                   
+      259 +  );                                                          
+      260 +}                                                             
+      261 +                                                              
+      262 +function StepConnector() {                                    
+      263 +  return <View className="w-0.5 h-6 bg-gray-300 ml-2" />;     
+      264 +}                                                             
+      265 +                                                              
+      266 +function DetailRow({ label, value }: { label: string; value: s
+          +tring }) {                                                    
+      267 +  return (                                                    
+      268 +    <View className="flex-row justify-between py-1">          
+      269 +      <Text className="text-gray-600">{label}:</Text>         
+      270 +      <Text className="font-medium text-gray-900 flex-shrink" 
+          +style={{ maxWidth: '60%', textAlign: 'right' }}>{value}</Text>
+      271 +    </View>                                                   
+      272 +  );                                                          
+      273 +}                                                             
+  ⎿  You've hit your limit · resets Feb 19, 2pm (Africa/Douala)
+     /upgrade or /extra-usage to finish what you’re working on.
+
+✻ Brewed for 5m 0s
+
+❯ continue 
+  ⎿  You've hit your limit · resets Feb 19, 2pm (Africa/Douala)
+     /upgrade or /extra-usage to finish what you’re working on.
+
+❯ /help 
+  ⎿  Help dialog dismissed

@@ -6,7 +6,7 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from rest_framework import permissions
-from apps.transfers.webhooks import awdpay_webhook
+from apps.transfers.webhooks import awdpay_deposit_callback, awdpay_withdrawal_callback
 # from drf_yasg.views import get_schema_view
 # from drf_yasg import openapi
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
@@ -34,7 +34,8 @@ urlpatterns = [
     path('api/kyc/', include('apps.kyc.urls')),
      path('api/routes/', include('apps.routes.urls')),
     path('api/transfers/', include('apps.transfers.urls')),
-    path('webhooks/awdpay/', awdpay_webhook),
+    path('webhooks/awdpay/deposit/', awdpay_deposit_callback),
+    path('webhooks/awdpay/withdrawal/', awdpay_withdrawal_callback),
     
     # API Documentation
         # YOUR PATTERNS

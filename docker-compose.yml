@@ -27,7 +27,7 @@ services:
       MYSQL_PASSWORD: chic_password
       MYSQL_ROOT_PASSWORD: root_password
     ports:
-      - "3306:3307"
+      - "3307:3307"
     volumes:
       - mysql_data:/var/lib/mysql
 

@@ -1,20 +1,48 @@
 # apps/transfers/serializers.py
 
+from decimal import Decimal
+
 from rest_framework import serializers
 from django.utils import timezone
 
 from .models import Transfer, TransferLimitSnapshot, Currency
 from apps.kyc.models import KYCProfile
+from apps.routes.models import Corridor, MobileMoneyProvider
+from apps.integrations.gateway_mapping import get_gateway_info
 
 
 class CreateTransferSerializer(serializers.Serializer):
+    # Sender info
+    sender_phone = serializers.CharField(max_length=20)
+    sender_name = serializers.CharField(max_length=255)
+
+    # Recipient info
     recipient_name = serializers.CharField(max_length=255)
     recipient_phone = serializers.CharField(max_length=20)
     recipient_email = serializers.EmailField(required=False, allow_blank=True)
+
+    # Transfer details
     amount = serializers.DecimalField(max_digits=15, decimal_places=2, min_value=100)
     currency = serializers.ChoiceField(choices=Currency.choices, default=Currency.XAF)
     description = serializers.CharField(max_length=500, required=False, allow_blank=True)
+
+    # Providers
+    funding_provider = serializers.ChoiceField(choices=MobileMoneyProvider.choices)
+    payout_provider = serializers.ChoiceField(choices=MobileMoneyProvider.choices)
+
     device_id = serializers.CharField(max_length=255)
+
+    def validate_funding_provider(self, value):
+        info = get_gateway_info(value)
+        if not info:
+            raise serializers.ValidationError(f"Unsupported funding provider: {value}")
+        return value
+
+    def validate_payout_provider(self, value):
+        info = get_gateway_info(value)
+        if not info:
+            raise serializers.ValidationError(f"Unsupported payout provider: {value}")
+        return value
 
     def validate(self, attrs):
         request = self.context['request']
@@ -26,6 +54,32 @@ class CreateTransferSerializer(serializers.Serializer):
             kyc_profile = user.kyc_profile
         except KYCProfile.DoesNotExist:
             raise serializers.ValidationError("Complete your KYC profile to send money.")
+
+        # Resolve gateway info for both providers
+        funding_info = get_gateway_info(attrs['funding_provider'])
+        payout_info = get_gateway_info(attrs['payout_provider'])
+
+        # Look up corridor from source country -> destination country
+        try:
+            corridor = Corridor.objects.get(
+                source_country__iso_code=funding_info['country'],
+                destination_country__iso_code=payout_info['country'],
+                is_active=True,
+            )
+        except Corridor.DoesNotExist:
+            raise serializers.ValidationError(
+                f"No active corridor from {funding_info['country']} to {payout_info['country']}."
+            )
+
+        # Corridor amount constraints
+        if amount < corridor.min_amount:
+            raise serializers.ValidationError({
+                'amount': f"Minimum amount for this corridor is {corridor.min_amount}."
+            })
+        if amount > corridor.max_amount:
+            raise serializers.ValidationError({
+                'amount': f"Maximum amount for this corridor is {corridor.max_amount}."
+            })
 
         # Get limits based on KYC
         limits = kyc_profile.get_transaction_limit()
@@ -51,9 +105,16 @@ class CreateTransferSerializer(serializers.Serializer):
                 'amount': f"Monthly limit exceeded. Remaining this month: {remaining} {attrs['currency']}."
             })
 
+        # Compute corridor-based fee
+        fee = corridor.fixed_fee + (amount * corridor.percentage_fee / Decimal('100'))
+
         attrs['kyc_profile'] = kyc_profile
         attrs['snapshot'] = snapshot
         attrs['limits'] = limits
+        attrs['corridor'] = corridor
+        attrs['service_fee'] = fee.quantize(Decimal('0.01'))
+        attrs['funding_info'] = funding_info
+        attrs['payout_info'] = payout_info
         return attrs
 
 
@@ -66,16 +127,42 @@ class TransferSerializer(serializers.ModelSerializer):
             'id',
             'status',
             'status_display',
+            # Sender
+            'sender_phone',
+            'sender_name',
+            'sender_email',
+            'funding_mobile_provider',
+            # Source amount
             'amount',
             'currency',
             'service_fee',
             'total_amount',
+            # Destination amount
+            'destination_amount',
+            'destination_currency',
+            # Payout
+            'payout_mobile_provider',
+            # Recipient
             'recipient_name',
             'recipient_phone',
             'recipient_email',
+            # Reference
             'reference',
             'provider',
             'provider_id',
+            # Deposit phase
+            'deposit_reference',
+            'deposit_status',
+            'deposit_gateway',
+            'deposit_initiated_at',
+            'deposit_confirmed_at',
+            # Withdrawal phase
+            'withdrawal_reference',
+            'withdrawal_status',
+            'withdrawal_gateway',
+            'withdrawal_initiated_at',
+            'withdrawal_confirmed_at',
+            # Other
             'description',
             'created_at',
             'completed_at',
@@ -96,6 +183,11 @@ class TransferHistorySerializer(serializers.ModelSerializer):
             'status_display',
             'amount',
             'currency',
+            'destination_amount',
+            'destination_currency',
+            'funding_mobile_provider',
+            'payout_mobile_provider',
+            'sender_phone',
             'recipient_name',
             'recipient_phone',
             'created_at',

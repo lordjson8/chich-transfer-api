@@ -80,7 +80,8 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 
 DB_ENGINE = config("DB_ENGINE", "django.db.backends.sqlite3")
-# print(f"Engine {DB_ENGINE}")
+# print(f"Engine {DB_ENGINE}, Host {config('DB_HOST', 'default-host')}, Port {config('DB_PORT', 'default-port')}, Name {config('DB_NAME', 'default-name')}, User {config('DB")
+
 
 if DB_ENGINE == "django.db.backends.mysql":
     DATABASES = {
@@ -357,11 +358,14 @@ TRANSFER_MAX_AMOUNT_EUR = 1000
 TRANSFER_DAILY_LIMIT_EUR = 5000
 TRANSFER_QUOTE_VALIDITY_MINUTES = 5
 
-# AwdPay Integration
-AWDPAY_API_KEY = config('AWDPAY_API_KEY', default='')
-AWDPAY_API_SECRET = config('AWDPAY_API_SECRET', default='')
-AWDPAY_API_URL = config('AWDPAY_BASE_URL', default='https://api.awdpay.com/v1')
-AWDPAY_WEBHOOK_SECRET = config('AWDPAY_WEBHOOK_SECRET', default='')
+# AwdPay Integration (OAuth2 / Keycloak)
+AWDPAY_BASE_URL = config('AWDPAY_BASE_URL', default='https://api.awdpay.com')
+AWDPAY_API_VERSION = config('AWDPAY_API_VERSION', default='api/v2')
+AWDPAY_KEYCLOAK_BASE_URL = config('AWDPAY_KEYCLOAK_BASE_URL', default='')
+AWDPAY_KEYCLOAK_REALM = config('AWDPAY_KEYCLOAK_REALM', default='awdpay-marchand')
+AWDPAY_KEYCLOAK_CLIENT_ID = config('AWDPAY_KEYCLOAK_CLIENT_ID', default='')
+AWDPAY_KEYCLOAK_CLIENT_SECRET = config('AWDPAY_KEYCLOAK_CLIENT_SECRET', default='')
+AWDPAY_CALLBACK_BASE_URL = config('AWDPAY_CALLBACK_BASE_URL', default='http://localhost:8000')
 
 # SMS Provider (example: Africa's Talking)
 SMS_PROVIDER = config('SMS_PROVIDER', default='africastalking')

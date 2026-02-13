@@ -1,5 +1,8 @@
 # apps/transfers/views.py
 
+import logging
+import uuid
+
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -7,8 +10,6 @@ from rest_framework.throttling import UserRateThrottle
 from rest_framework import status
 from django.db import transaction as db_transaction
 from django.utils import timezone
-from django.conf import settings
-import uuid
 
 from .models import Transfer, TransferLimitSnapshot, TransferAuditLog, TransferStatus
 from .serializers import (
@@ -17,17 +18,18 @@ from .serializers import (
     TransferHistorySerializer,
     TransferLimitSerializer,
 )
-from apps.integrations.awdpay import AwdPayClient
-from apps.core.utils import get_client_ip  # you likely already have something like this
-from decimal import Decimal
+from apps.integrations.awdpay import AwdPayClient, AWDPayAPIError, AWDPayTokenError
+from apps.core.utils import get_client_ip
+
+logger = logging.getLogger(__name__)
+
 
 class TransferThrottle(UserRateThrottle):
-    scope = 'transaction'  # matches your DRF throttle rates
+    scope = 'transaction'
 
 
 class CreateTransferView(APIView):
     permission_classes = [IsAuthenticated]
-    # throttle_classes = [TransferThrottle]
 
     @db_transaction.atomic
     def post(self, request):
@@ -40,20 +42,41 @@ class CreateTransferView(APIView):
         data = serializer.validated_data
         user = request.user
         snapshot: TransferLimitSnapshot = data['snapshot']
+        corridor = data['corridor']
+        funding_info = data['funding_info']
+        payout_info = data['payout_info']
 
         reference = f"TRF-{uuid.uuid4().hex[:12].upper()}"
 
         transfer = Transfer.objects.create(
             user=user,
-            amount=data['amount'],
-            currency=data['currency'],
+            # Sender
+            sender_phone=data['sender_phone'],
+            sender_name=data['sender_name'],
+            sender_email=user.email,
+            funding_mobile_provider=data['funding_provider'],
+            # Recipient
             recipient_name=data['recipient_name'],
             recipient_phone=data['recipient_phone'],
             recipient_email=data.get('recipient_email', ''),
+            # Payout
+            payout_mobile_provider=data['payout_provider'],
+            # Corridor
+            corridor=corridor,
+            # Source amount
+            amount=data['amount'],
+            currency=data['currency'],
+            service_fee=data['service_fee'],
+            # Destination (same amount for now; exchange logic can be added later)
+            destination_amount=data['amount'],
+            destination_currency=payout_info['currency'],
+            # Meta
             description=data.get('description', ''),
-            service_fee=self._calc_fee(data['amount']),
             reference=reference,
             provider='awdpay',
+            # Gateways (store for reference)
+            deposit_gateway=funding_info['gateway'],
+            withdrawal_gateway=payout_info['gateway'],
         )
         transfer.total_amount = transfer.amount + transfer.service_fee
         transfer.save(update_fields=['total_amount'])
@@ -64,41 +87,45 @@ class CreateTransferView(APIView):
             metadata={
                 'device_id': data['device_id'],
                 'kyc_level': data['kyc_profile'].kyc_level,
+                'funding_provider': data['funding_provider'],
+                'payout_provider': data['payout_provider'],
             },
             ip=get_client_ip(request),
         )
 
+        # Initiate deposit (phase 1: collect from sender)
         client = AwdPayClient()
-        provider_res = client.create_transfer(
-            reference=reference,
-            amount=str(transfer.amount),
-            currency=transfer.currency,
-            recipient_phone=transfer.recipient_phone,
-            recipient_name=transfer.recipient_name,
-            description=transfer.description,
-        )
-
-        if not provider_res['success']:
-            transfer.mark_failed(provider_res['error'], code='PROVIDER_ERROR')
+        try:
+            deposit_res = client.initiate_deposit(
+                amount=str(transfer.total_amount),
+                currency=funding_info['currency'],
+                gateway=funding_info['gateway'],
+                phone=transfer.sender_phone,
+                country=funding_info['country'],
+                reference=reference,
+                description=transfer.description or f"Transfer {reference}",
+            )
+        except (AWDPayAPIError, AWDPayTokenError) as exc:
+            transfer.mark_failed(str(exc), code='DEPOSIT_INIT_ERROR')
             TransferAuditLog.log(
-                transfer,
-                'failed',
-                metadata={'provider_error': provider_res['error']},
+                transfer, 'failed',
+                metadata={'error': str(exc)},
                 ip=get_client_ip(request),
             )
             return Response(
                 {
                     'success': False,
-                    'error': provider_res['error'],
-                    'error_code': 'TRANSFER_FAILED',
+                    'error': str(exc),
+                    'error_code': 'DEPOSIT_INIT_ERROR',
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        transfer.status = TransferStatus.PROCESSING
-        transfer.provider_id = provider_res['provider_id']
-        transfer.save(update_fields=['status', 'provider_id'])
+        # Mark deposit pending
+        deposit_ref = deposit_res.get('depositRef', deposit_res.get('ref', reference))
+        transfer.mark_deposit_pending(deposit_ref, funding_info['gateway'])
 
+        # Update user limits
         snapshot.total_sent += transfer.amount
         snapshot.transfer_count += 1
         snapshot.daily_sent += transfer.amount
@@ -106,9 +133,12 @@ class CreateTransferView(APIView):
         snapshot.save()
 
         TransferAuditLog.log(
-            transfer,
-            'provider_init',
-            metadata={'provider_id': transfer.provider_id},
+            transfer, 'deposit_initiated',
+            metadata={
+                'deposit_ref': deposit_ref,
+                'gateway': funding_info['gateway'],
+                'awdpay_response': deposit_res,
+            },
             ip=get_client_ip(request),
         )
 
@@ -116,47 +146,15 @@ class CreateTransferView(APIView):
         return Response(
             {
                 'success': True,
-                'message': 'Transfer initiated successfully.',
+                'message': (
+                    'Transfer initiated. A USSD prompt has been sent to the sender\'s phone. '
+                    'Please confirm the payment on your mobile device.'
+                ),
                 'data': out.data,
             },
             status=status.HTTP_201_CREATED,
         )
 
-    def _calc_fee(self, amount, currency='XAF'):
-
-        # fee_rate = Decimal('0.01')  # 1%
-        # min_fee = Decimal('50')
-        # max_fee = Decimal('500')
-        
-        # # Calculate fee
-        # fee = amount * fee_rate
-        
-        # # Apply min/max bounds
-        # if fee < min_fee:
-        #     fee = min_fee
-        # elif fee > max_fee:
-        #     fee = max_fee
-        
-        # return fee
-
-        amount = Decimal(str(amount))  # Ensure Decimal
-        
-        # Fee tiers
-        if amount <= Decimal('10000'):
-            return Decimal('50')
-        
-        elif amount <= Decimal('50000'):
-            fee = amount * Decimal('0.01')  # 1%
-            return max(Decimal('100'), min(fee, Decimal('500')))
-        
-        elif amount <= Decimal('200000'):
-            fee = amount * Decimal('0.008')  # 0.8%
-            return max(Decimal('500'), min(fee, Decimal('1500')))
-        
-        else:  # > 200,000
-            fee = amount * Decimal('0.005')  # 0.5%
-            return max(Decimal('1500'), min(fee, Decimal('5000')))
-        
 
 class TransferHistoryView(APIView):
     permission_classes = [IsAuthenticated]

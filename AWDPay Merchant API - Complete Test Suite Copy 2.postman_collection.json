@@ -1,0 +1,2598 @@
+{
+  "info": {
+    "_postman_id": "08866eba-663c-4907-9c4c-e83ce2d3aa5b",
+    "name": "AWDPay Merchant API - Complete Test Suite Copy 2",
+    "description": "Collection Postman complète pour tester l'API AWDPay V2 - Gestion des marchands, passerelles, dépôts et retraits",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "52163697",
+    "_collection_link": "https://go.postman.co/collection/52163697-08866eba-663c-4907-9c4c-e83ce2d3aa5b?source=collection_link"
+  },
+  "item": [
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Get Access Token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.collectionVariables.set('access_token', jsonData.access_token);",
+                  "    pm.test('Token récupéré avec succès', function () {",
+                  "        pm.expect(jsonData.access_token).to.not.be.undefined;",
+                  "    });",
+                  "} else {",
+                  "    pm.test('Erreur lors de la récupération du token', function () {",
+                  "        pm.expect.fail('Impossible de récupérer le token d\\'accès');",
+                  "    });",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "client_credentials"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{keycloak_client_id}}"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{keycloak_client_secret}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{keycloak_base_url}}/realms/{{keycloak_realm}}/protocol/openid-connect/token",
+              "host": [
+                "{{keycloak_base_url}}"
+              ],
+              "path": [
+                "realms",
+                "{{keycloak_realm}}",
+                "protocol",
+                "openid-connect",
+                "token"
+              ]
+            },
+            "description": "Obtenir un token d'accès OAuth2 pour authentifier les requêtes API"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Access Token Copy",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.collectionVariables.set('access_token', jsonData.access_token);",
+                  "    pm.test('Token récupéré avec succès', function () {",
+                  "        pm.expect(jsonData.access_token).to.not.be.undefined;",
+                  "    });",
+                  "} else {",
+                  "    pm.test('Erreur lors de la récupération du token', function () {",
+                  "        pm.expect.fail('Impossible de récupérer le token d\\'accès');",
+                  "    });",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "client_credentials"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{keycloak_client_id}}"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{keycloak_client_secret}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{keycloak_base_url}}/realms/{{keycloak_realm}}/protocol/openid-connect/token",
+              "host": [
+                "{{keycloak_base_url}}"
+              ],
+              "path": [
+                "realms",
+                "{{keycloak_realm}}",
+                "protocol",
+                "openid-connect",
+                "token"
+              ]
+            },
+            "description": "Obtenir un token d'accès OAuth2 pour authentifier les requêtes API"
+          },
+          "response": []
+        }
+      ],
+      "description": "Endpoints pour l'authentification OAuth2 avec Keycloak"
+    },
+    {
+      "name": "Merchant Management",
+      "item": [
+        {
+          "name": "Create Merchant Client",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response contains success message', function () {",
+                  "    pm.expect(pm.response.text()).to.include('Api créé pour le marchand');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/{{api_version}}/merchant/create?clientId={{test_client_id}}&mail={{test_merchant_email}}&merchantId={{test_merchant_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{api_version}}",
+                "merchant",
+                "create"
+              ],
+              "query": [
+                {
+                  "key": "clientId",
+                  "value": "{{test_client_id}}",
+                  "description": "ID du client marchand (API Key)"
+                },
+                {
+                  "key": "mail",
+                  "value": "{{test_merchant_email}}",
+                  "description": "Email du marchand"
+                },
+                {
+                  "key": "merchantId",
+                  "value": "{{test_merchant_id}}",
+                  "description": "ID du marchand dans la base de données"
+                }
+              ]
+            },
+            "description": "Créer un nouveau client Keycloak pour un marchand"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Merchant Client Secret",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response contains client secret', function () {",
+                  "    const secret = pm.response.text();",
+                  "    pm.expect(secret).to.not.be.empty;",
+                  "    pm.collectionVariables.set('client_secret_response', secret);",
+                  "});",
+                  "",
+                  "pm.test('Secret format is valid', function () {",
+                  "    const secret = pm.response.text();",
+                  "    pm.expect(secret.length).to.be.greaterThan(10);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/{{api_version}}/merchant/secret?clientId={{test_client_id}}&mail={{test_merchant_email}}&merchantId={{test_merchant_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{api_version}}",
+                "merchant",
+                "secret"
+              ],
+              "query": [
+                {
+                  "key": "clientId",
+                  "value": "{{test_client_id}}",
+                  "description": "ID du client marchand (API Key)"
+                },
+                {
+                  "key": "mail",
+                  "value": "{{test_merchant_email}}",
+                  "description": "Email du marchand"
+                },
+                {
+                  "key": "merchantId",
+                  "value": "{{test_merchant_id}}",
+                  "description": "ID du marchand dans la base de données"
+                }
+              ]
+            },
+            "description": "Récupérer le secret client existant pour un marchand"
+          },
+          "response": []
+        },
+        {
+          "name": "Regenerate Merchant Client Secret",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response contains new client secret', function () {",
+                  "    const newSecret = pm.response.text();",
+                  "    pm.expect(newSecret).to.not.be.empty;",
+                  "    ",
+                  "    const oldSecret = pm.collectionVariables.get('client_secret_response');",
+                  "    if (oldSecret && oldSecret !== '') {",
+                  "        pm.expect(newSecret).to.not.equal(oldSecret);",
+                  "    }",
+                  "    ",
+                  "    pm.collectionVariables.set('client_secret_response', newSecret);",
+                  "});",
+                  "",
+                  "pm.test('New secret format is valid', function () {",
+                  "    const secret = pm.response.text();",
+                  "    pm.expect(secret.length).to.be.greaterThan(10);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/{{api_version}}/merchant/regenerate-secret?clientId={{test_client_id}}&mail={{test_merchant_email}}&merchantId={{test_merchant_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{api_version}}",
+                "merchant",
+                "regenerate-secret"
+              ],
+              "query": [
+                {
+                  "key": "clientId",
+                  "value": "{{test_client_id}}",
+                  "description": "ID du client marchand (API Key)"
+                },
+                {
+                  "key": "mail",
+                  "value": "{{test_merchant_email}}",
+                  "description": "Email du marchand"
+                },
+                {
+                  "key": "merchantId",
+                  "value": "{{test_merchant_id}}",
+                  "description": "ID du marchand dans la base de données"
+                }
+              ]
+            },
+            "description": "Régénérer un nouveau secret client pour un marchand"
+          },
+          "response": []
+        }
+      ],
+      "description": "Endpoints pour la gestion des clients marchands et leurs secrets"
+    },
+    {
+      "name": "Gateway Management",
+      "item": [
+        {
+          "name": "List Deposit Gateways",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response is an array', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.be.an('array');",
+                  "});",
+                  "",
+                  "pm.test('Gateway objects have required properties', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    if (jsonData.length > 0) {",
+                  "        const gateway = jsonData[0];",
+                  "        pm.expect(gateway).to.have.property('name');",
+                  "        pm.expect(gateway).to.have.property('allowedCountries');",
+                  "        pm.expect(gateway).to.have.property('allowedCurrencies');",
+                  "        pm.expect(gateway).to.have.property('config');",
+                  "        ",
+                  "        pm.expect(gateway.allowedCountries).to.be.an('array');",
+                  "        pm.expect(gateway.allowedCurrencies).to.be.an('array');",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/public/gateways/deposit/list",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "public",
+                "gateways",
+                "deposit",
+                "list"
+              ]
+            },
+            "description": "Récupérer la liste des passerelles de dépôt disponibles"
+          },
+          "response": []
+        },
+        {
+          "name": "List Test Deposit Gateways",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response is an array', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.be.an('array');",
+                  "});",
+                  "",
+                  "pm.test('Gateway objects have required properties', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    if (jsonData.length > 0) {",
+                  "        const gateway = jsonData[0];",
+                  "        pm.expect(gateway).to.have.property('name');",
+                  "        pm.expect(gateway).to.have.property('allowedCountries');",
+                  "        pm.expect(gateway).to.have.property('allowedCurrencies');",
+                  "        pm.expect(gateway).to.have.property('config');",
+                  "        ",
+                  "        pm.expect(gateway.allowedCountries).to.be.an('array');",
+                  "        pm.expect(gateway.allowedCurrencies).to.be.an('array');",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/test/public/gateways/deposit/list",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "test",
+                "public",
+                "gateways",
+                "deposit",
+                "list"
+              ]
+            },
+            "description": "Récupérer la liste des passerelles de dépôt disponibles"
+          },
+          "response": []
+        }
+      ],
+      "description": "Endpoints pour la gestion des passerelles de paiement"
+    },
+    {
+      "name": "Deposits Management",
+      "item": [
+        {
+          "name": "Create Deposit",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response contains deposit information', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('reference');",
+                  "    pm.expect(jsonData).to.have.property('status');",
+                  "    pm.expect(jsonData).to.have.property('amount');",
+                  "    pm.expect(jsonData).to.have.property('currency');",
+                  "    pm.expect(jsonData).to.have.property('gatewayName');",
+                  "    pm.expect(jsonData).to.have.property('paymentType');",
+                  "    pm.expect(jsonData).to.have.property('instructions');",
+                  "    ",
+                  "    pm.collectionVariables.set('test_deposit_reference', jsonData.reference);",
+                  "});",
+                  "",
+                  "pm.test('Status is pending', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql('pending');",
+                  "});"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": {{test_amount}},\n  \"currency\": \"{{test_currency}}\",\n  \"customerEmail\": \"{{test_customer_email}}\",\n  \"customerPhone\": \"{{test_customer_phone}}\",\n  \"country\": \"{{test_country}}\",\n  \"gatewayName\": \"{{test_gateway_name}}\",\n  \"callbackUrl\": \"{{test_callback_url}}\",\n  \"customerName\": \"{{test_customer_name}}\",\n  \"returnUrl\": \"{{test_return_url}}\",\n  \"metadata\": {\n    \"order_id\": \"ORDER_123\",\n    \"description\": \"Test deposit\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/{{api_version}}/classic/deposit/initiate",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{api_version}}",
+                "classic",
+                "deposit",
+                "initiate"
+              ]
+            },
+            "description": "Créer un nouveau dépôt avec une passerelle spécifique"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Deposit Sandbox",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response contains deposit information', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('reference');",
+                  "    pm.expect(jsonData).to.have.property('status');",
+                  "    pm.expect(jsonData).to.have.property('amount');",
+                  "    pm.expect(jsonData).to.have.property('currency');",
+                  "    pm.expect(jsonData).to.have.property('gatewayName');",
+                  "    pm.expect(jsonData).to.have.property('paymentType');",
+                  "    pm.expect(jsonData).to.have.property('instructions');",
+                  "    ",
+                  "    pm.collectionVariables.set('test_deposit_reference', jsonData.reference);",
+                  "});",
+                  "",
+                  "pm.test('Status is pending', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql('pending');",
+                  "});"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": {{test_amount}},\n  \"currency\": \"{{test_currency}}\",\n  \"customerEmail\": \"{{test_customer_email}}\",\n  \"customerPhone\": \"{{test_customer_phone}}\",\n  \"country\": \"{{test_country}}\",\n  \"gatewayName\": \"{{test_gateway_name}}\",\n  \"callbackUrl\": \"{{test_callback_url}}\",\n  \"customerName\": \"{{test_customer_name}}\",\n  \"returnUrl\": \"{{test_return_url}}\",\n  \"metadata\": {\n    \"order_id\": \"ORDER_123\",\n    \"description\": \"Test deposit\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/test/{{api_version}}/classic/deposit/initiate",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "test",
+                "{{api_version}}",
+                "classic",
+                "deposit",
+                "initiate"
+              ]
+            },
+            "description": "Créer un nouveau dépôt avec une passerelle spécifique"
+          },
+          "response": []
+        },
+        {
+          "name": "Validate Deposit Invoice",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response contains deposit information', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('reference');",
+                  "    pm.expect(jsonData).to.have.property('status');",
+                  "    pm.expect(jsonData).to.have.property('amount');",
+                  "    pm.expect(jsonData).to.have.property('currency');",
+                  "    pm.expect(jsonData).to.have.property('gatewayName');",
+                  "    pm.expect(jsonData).to.have.property('paymentType');",
+                  "    pm.expect(jsonData).to.have.property('instructions');",
+                  "    ",
+                  "    pm.collectionVariables.set('test_deposit_reference', jsonData.reference);",
+                  "});",
+                  "",
+                  "pm.test('Status is pending', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql('pending');",
+                  "});"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": {{test_amount}},\n  \"currency\": \"{{test_currency}}\",\n  \"customerEmail\": \"{{test_customer_email}}\",\n  \"customerPhone\": \"{{test_customer_phone}}\",\n  \"country\": \"{{test_country}}\",\n  \"gatewayName\": \"{{test_gateway_name}}\",\n  \"callbackUrl\": \"{{test_callback_url}}\",\n  \"customerName\": \"{{test_customer_name}}\",\n  \"returnUrl\": \"{{test_return_url}}\",\n  \"metadata\": {\n    \"order_id\": \"ORDER_123\",\n    \"description\": \"Test deposit\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/{{api_version}}/validation/deposit/generate-invoice",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{api_version}}",
+                "validation",
+                "deposit",
+                "generate-invoice"
+              ]
+            },
+            "description": "Créer un nouveau dépôt avec une passerelle spécifique"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Invoice Deposit",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response contains deposit information', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('reference');",
+                  "    pm.expect(jsonData).to.have.property('status');",
+                  "    pm.expect(jsonData).to.have.property('amount');",
+                  "    pm.expect(jsonData).to.have.property('currency');",
+                  "    pm.expect(jsonData).to.have.property('gatewayName');",
+                  "    pm.expect(jsonData).to.have.property('paymentType');",
+                  "    pm.expect(jsonData).to.have.property('instructions');",
+                  "    ",
+                  "    pm.collectionVariables.set('test_deposit_reference', jsonData.reference);",
+                  "});",
+                  "",
+                  "pm.test('Status is pending', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql('pending');",
+                  "});"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": {{test_amount}},\n  \"currency\": \"{{test_currency}}\",\n  \"customerEmail\": \"{{test_customer_email}}\",\n  \"customerPhone\": \"{{test_customer_phone}}\",\n  \"country\": \"{{test_country}}\",\n  \"gatewayName\": \"{{test_gateway_name}}\",\n  \"callbackUrl\": \"{{test_callback_url}}\",\n  \"customerName\": \"{{test_customer_name}}\",\n  \"returnUrl\": \"{{test_return_url}}\",\n  \"metadata\": {\n    \"order_id\": \"ORDER_123\",\n    \"description\": \"Test deposit\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/{{api_version}}/validation/deposit/generate-invoice",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{api_version}}",
+                "validation",
+                "deposit",
+                "generate-invoice"
+              ]
+            },
+            "description": "Créer un nouveau dépôt avec une passerelle spécifique"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Deposit Status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response contains status information', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('reference');",
+                  "    pm.expect(jsonData).to.have.property('status');",
+                  "    pm.expect(jsonData).to.have.property('amount');",
+                  "    pm.expect(jsonData).to.have.property('currency');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/{{api_version}}/deposit/deposits/{{test_deposit_reference}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{api_version}}",
+                "deposit",
+                "deposits",
+                "{{test_deposit_reference}}"
+              ]
+            },
+            "description": "Récupérer le statut d'un dépôt par sa référence"
+          },
+          "response": []
+        },
+        {
+          "name": "List Merchant Deposits",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response is paginated', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('content');",
+                  "    pm.expect(jsonData).to.have.property('pageable');",
+                  "    pm.expect(jsonData).to.have.property('totalElements');",
+                  "});"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/{{api_version}}/deposit/list?page=0&size=10&status=pending",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{api_version}}",
+                "deposit",
+                "list"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0",
+                  "description": "Numéro de page"
+                },
+                {
+                  "key": "size",
+                  "value": "10",
+                  "description": "Taille de page"
+                },
+                {
+                  "key": "status",
+                  "value": "pending",
+                  "description": "Filtrer par statut"
+                }
+              ]
+            },
+            "description": "Récupérer la liste paginée des dépôts du marchand"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Deposit Statistics",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response contains statistics', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('totalDeposits');",
+                  "    pm.expect(jsonData).to.have.property('successfulDeposits');",
+                  "    pm.expect(jsonData).to.have.property('successRate');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/{{api_version}}/deposits/statistics?startDate=2024-01-01&endDate=2024-12-31",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{api_version}}",
+                "deposits",
+                "statistics"
+              ],
+              "query": [
+                {
+                  "key": "startDate",
+                  "value": "2024-01-01",
+                  "description": "Date de début"
+                },
+                {
+                  "key": "endDate",
+                  "value": "2024-12-31",
+                  "description": "Date de fin"
+                }
+              ]
+            },
+            "description": "Récupérer les statistiques des dépôts"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Payment Link",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": {{test_withdraw_amount}},\n  \"currency\": \"{{test_currency}}\",\n  \"country\": \"{{test_country}}\",\n  \"logo\": \"https://i.tracxn.com/logo/company/awdpay_com_23f15072-9ddc-4047-97dd-cacff53f08c9?format=webp&height=120&width=120\",\n  \"callbackUrl\": \"{{test_callback_url}}\",\n  \"cancelUrl\": \"https://test.com\",\n  \"successUrl\": \"https://test.com\",\n \"customerAddress\": \"pk 17\",\n  \"customerEmail\": \"{{test_customer_email}}\",\n  \"customerName\": \"Test Customer\",\n  \"feeByCustomer\" : false,\n  \"custom\": {\n    \"withdrawal_id\": \"WDR_123\",\n    \"description\": \"Test withdrawal\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/{{api_version}}/payments/link",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{api_version}}",
+                "payments",
+                "link"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Endpoints pour la gestion des dépôts"
+    },
+    {
+      "name": "Withdrawals Management",
+      "item": [
+        {
+          "name": "List Withdrawal Gateways",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response is an array', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.be.an('array');",
+                  "});",
+                  "",
+                  "pm.test('Withdrawal gateway has required properties', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    if (jsonData.length > 0) {",
+                  "        const gateway = jsonData[0];",
+                  "        pm.expect(gateway).to.have.property('name');",
+                  "        pm.expect(gateway).to.have.property('allowedCountries');",
+                  "        pm.expect(gateway).to.have.property('allowedCurrencies');",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/{{api_version}}/withdraw/list",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{api_version}}",
+                "withdraw",
+                "list"
+              ]
+            },
+            "description": "Récupérer la liste des passerelles de retrait disponibles"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Withdrawal",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response contains withdrawal information', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('reference');",
+                  "    pm.expect(jsonData).to.have.property('status');",
+                  "    pm.expect(jsonData).to.have.property('amount');",
+                  "    pm.expect(jsonData).to.have.property('currency');",
+                  "    pm.expect(jsonData).to.have.property('gatewayName');",
+                  "    ",
+                  "    pm.collectionVariables.set('test_withdraw_reference', jsonData.reference);",
+                  "});",
+                  "",
+                  "pm.test('Status is pending or processing', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(['pending', 'processing']).to.include(jsonData.status);",
+                  "});"
+                ],
+                "type": "text/javascript",
+                "packages": {},
+                "requests": {}
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": {{test_withdraw_amount}},\n  \"currency\": \"{{test_currency}}\",\n  \"beneficiaryPhone\": \"{{test_customer_phone}}\",\n  \"beneficiaryEmail\": \"{{test_customer_email}}\",\n  \"beneficiaryName\": \"Test Customer\",\n  \"country\": \"{{test_country}}\",\n  \"gatewayName\": \"{{test_gateway_name}}\",\n  \"callbackUrl\": \"{{test_callback_url}}\",\n  \"returnUrl\": \"https://test.com\",\n  \"metadata\": {\n    \"withdrawal_id\": \"WDR_123\",\n    \"description\": \"Test withdrawal\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/{{api_version}}/withdraw/initiate",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{api_version}}",
+                "withdraw",
+                "initiate"
+              ]
+            },
+            "description": "Initier un nouveau retrait"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Withdrawal Status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response contains withdrawal details', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('reference');",
+                  "    pm.expect(jsonData).to.have.property('status');",
+                  "    pm.expect(jsonData).to.have.property('amount');",
+                  "    pm.expect(jsonData).to.have.property('customerPhone');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/{{api_version}}/withdraw/withdrawals/{{test_withdraw_reference}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{api_version}}",
+                "withdraw",
+                "withdrawals",
+                "{{test_withdraw_reference}}"
+              ]
+            },
+            "description": "Récupérer le statut d'un retrait par sa référence"
+          },
+          "response": []
+        },
+        {
+          "name": "List Merchant Withdrawals",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response is paginated', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('content');",
+                  "    pm.expect(jsonData).to.have.property('pageable');",
+                  "    pm.expect(jsonData).to.have.property('totalElements');",
+                  "});",
+                  "",
+                  "pm.test('Withdrawal items have correct structure', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    if (jsonData.content && jsonData.content.length > 0) {",
+                  "        const withdrawal = jsonData.content[0];",
+                  "        pm.expect(withdrawal).to.have.property('reference');",
+                  "        pm.expect(withdrawal).to.have.property('status');",
+                  "        pm.expect(withdrawal).to.have.property('amount');",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/{{api_version}}/withdrawals?page=0&size=10&status=pending",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{api_version}}",
+                "withdrawals"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0",
+                  "description": "Numéro de page"
+                },
+                {
+                  "key": "size",
+                  "value": "10",
+                  "description": "Taille de page"
+                },
+                {
+                  "key": "status",
+                  "value": "pending",
+                  "description": "Filtrer par statut (optional)"
+                }
+              ]
+            },
+            "description": "Récupérer la liste paginée des retraits du marchand"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Withdrawal Statistics",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response contains withdrawal statistics', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('totalWithdrawals');",
+                  "    pm.expect(jsonData).to.have.property('successfulWithdrawals');",
+                  "    pm.expect(jsonData).to.have.property('failedWithdrawals');",
+                  "    pm.expect(jsonData).to.have.property('successRate');",
+                  "    pm.expect(jsonData).to.have.property('totalAmount');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/{{api_version}}/withdrawals/statistics?startDate=2024-01-01&endDate=2025-12-31",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{api_version}}",
+                "withdrawals",
+                "statistics"
+              ],
+              "query": [
+                {
+                  "key": "startDate",
+                  "value": "2024-01-01",
+                  "description": "Date de début"
+                },
+                {
+                  "key": "endDate",
+                  "value": "2025-12-31",
+                  "description": "Date de fin"
+                }
+              ]
+            },
+            "description": "Récupérer les statistiques des retraits"
+          },
+          "response": []
+        }
+      ],
+      "description": "Endpoints pour la gestion des retraits (withdrawals)"
+    },
+    {
+      "name": "Wallets Management",
+      "item": [
+        {
+          "name": "Get Wallet Balance",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response contains balance information', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('balance');",
+                  "    pm.expect(jsonData).to.have.property('currency');",
+                  "    pm.expect(jsonData.balance).to.be.a('number');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/{{api_version}}/wallet/balance",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{api_version}}",
+                "wallet",
+                "balance"
+              ]
+            },
+            "description": "Récupérer le solde du portefeuille du marchand"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Wallet Transactions",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Response is paginated', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('content');",
+                  "    pm.expect(jsonData).to.have.property('totalElements');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/{{api_version}}/wallet/transactions?page=0&size=20",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{api_version}}",
+                "wallet",
+                "transactions"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "0"
+                },
+                {
+                  "key": "size",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": "Récupérer l'historique des transactions du portefeuille"
+          },
+          "response": []
+        }
+      ],
+      "description": "Endpoints pour la gestion du portefeuille"
+    },
+    {
+      "name": "PayDunya Integration Tests",
+      "item": [
+        {
+          "name": "Create PayDunya Deposit - Wave CI",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('PayDunya deposit created successfully', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('reference');",
+                  "    pm.expect(jsonData.status).to.eql('pending');",
+                  "});",
+                  "",
+                  "pm.test('No phone validation error', function () {",
+                  "    const responseText = pm.response.text();",
+                  "    pm.expect(responseText.toLowerCase()).to.not.include('désolé, vous devez fournir');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 1000,\n  \"currency\": \"XOF\",\n  \"customerEmail\": \"customer@test.com\",\n  \"customerPhone\": \"0707070707\",\n  \"customerName\": \"hermann\",\n  \"country\": \"CI\",\n  \"gatewayName\": \"wave-ci\",\n  \"callbackUrl\": \"{{test_callback_url}}\",\n  \"returnUrl\": \"{{test_return_url}}\",\n  \"metadata\": {\n    \"order_id\": \"PD_CI_001\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/{{api_version}}/deposit/initiate",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{api_version}}",
+                "deposit",
+                "initiate"
+              ]
+            },
+            "description": "Test de dépôt PayDunya Wave CI avec validation du format de numéro"
+          },
+          "response": []
+        },
+        {
+          "name": "Create PayDunya Deposit - T-Money Togo",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('T-Money deposit accepted', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('reference');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 1500,\n  \"currency\": \"XOF\",\n  \"customerEmail\": \"customer@test.com\",\n  \"customerPhone\": \"90123456\",\n  \"customerName\": \"Test User\",\n  \"country\": \"TG\",\n  \"gatewayName\": \"t-money-togo\",\n  \"callbackUrl\": \"{{test_callback_url}}\",\n  \"returnUrl\": \"{{test_return_url}}\",\n  \"metadata\": {\n    \"order_id\": \"PD_TG_001\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/{{api_version}}/deposit/initiate",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{api_version}}",
+                "deposit",
+                "initiate"
+              ]
+            },
+            "description": "Test de dépôt PayDunya T-Money Togo"
+          },
+          "response": []
+        },
+        {
+          "name": "PayDunya Deposit Callback",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Callback processed successfully', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"data\": {\n    \"custom_data\": {\n      \"trxId\": \"{{test_deposit_reference}}\"\n    },\n    \"status\": \"completed\",\n    \"total_amount\": 1000\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/paydunya/deposit/callback",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "paydunya",
+                "deposit",
+                "callback"
+              ]
+            },
+            "description": "Simuler un callback PayDunya pour un dépôt"
+          },
+          "response": []
+        },
+        {
+          "name": "PayDunya Withdrawal Callback",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Withdrawal callback processed', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"data\": {\n    \"custom_data\": {\n      \"trxId\": \"{{test_withdraw_reference}}\"\n    },\n    \"status\": \"success\",\n    \"amount\": 5000\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/paydunya/withdraw/callback",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "paydunya",
+                "withdraw",
+                "callback"
+              ]
+            },
+            "description": "Simuler un callback PayDunya pour un retrait"
+          },
+          "response": []
+        }
+      ],
+      "description": "Tests d'intégration PayDunya pour dépôts et retraits"
+    },
+    {
+      "name": "MTN Integration Tests",
+      "item": [
+        {
+          "name": "Create MTN Deposit",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('MTN deposit initiated', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData).to.have.property('reference');",
+                  "    pm.expect(jsonData).to.have.property('instructions');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 2000,\n  \"currency\": \"XAF\",\n  \"customerEmail\": \"customer@test.com\",\n  \"customerPhone\": \"+241066000000\",\n  \"country\": \"GA\",\n  \"gatewayName\": \"mtn\",\n  \"callbackUrl\": \"{{test_callback_url}}\",\n  \"returnUrl\": \"{{test_return_url}}\",\n  \"metadata\": {\n    \"order_id\": \"MTN_DEP_001\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/{{api_version}}/deposit/initiate",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{api_version}}",
+                "deposit",
+                "initiate"
+              ]
+            },
+            "description": "Test de dépôt MTN Money"
+          },
+          "response": []
+        },
+        {
+          "name": "MTN Deposit Callback",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('MTN callback successful', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transaction_id\": \"{{test_deposit_reference}}\",\n  \"status\": \"SUCCESSFUL\",\n  \"amount\": 2000,\n  \"currency\": \"XAF\",\n  \"external_reference\": \"MTN_REF_789\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/mtn/deposit/callback",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "mtn",
+                "deposit",
+                "callback"
+              ]
+            },
+            "description": "Callback MTN pour confirmer un dépôt"
+          },
+          "response": []
+        },
+        {
+          "name": "MTN Withdrawal Callback",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('MTN withdrawal callback successful', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transaction_id\": \"{{test_withdraw_reference}}\",\n  \"status\": \"SUCCESSFUL\",\n  \"amount\": 5000,\n  \"currency\": \"XAF\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/mtn/withdraw/callback",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "mtn",
+                "withdraw",
+                "callback"
+              ]
+            },
+            "description": "Callback MTN pour confirmer un retrait"
+          },
+          "response": []
+        }
+      ],
+      "description": "Tests d'intégration MTN Money pour dépôts et retraits"
+    },
+    {
+      "name": "Webhooks Testing",
+      "item": [
+        {
+          "name": "Test MTN Webhook",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Webhook processed successfully', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql('success');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"transaction_id\": \"{{test_deposit_reference}}\",\n  \"status\": \"SUCCESSFUL\",\n  \"amount\": \"{{test_amount}}\",\n  \"currency\": \"{{test_currency}}\",\n  \"external_reference\": \"MTN_REF_123456\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/webhooks/mtn",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "webhooks",
+                "mtn"
+              ]
+            },
+            "description": "Test du webhook MTN Money"
+          },
+          "response": []
+        },
+        {
+          "name": "Test Orange Webhook",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('Orange webhook processed', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql('success');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"order_id\": \"{{test_deposit_reference}}\",\n  \"status\": \"SUCCESS\",\n  \"amount\": \"{{test_amount}}\",\n  \"txnid\": \"ORG_TXN_456789\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/webhooks/orange",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "webhooks",
+                "orange"
+              ]
+            },
+            "description": "Test du webhook Orange Money"
+          },
+          "response": []
+        }
+      ],
+      "description": "Tests des webhooks pour les passerelles de paiement"
+    },
+    {
+      "name": "Error Scenarios",
+      "item": [
+        {
+          "name": "Get Secret - Invalid Merchant ID",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400 (Bad Request)', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('Error message contains merchant not found', function () {",
+                  "    pm.expect(pm.response.text()).to.include('Marchand introuvable');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/{{api_version}}/merchant/secret?clientId={{test_client_id}}&mail={{test_merchant_email}}&merchantId=99999",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{api_version}}",
+                "merchant",
+                "secret"
+              ],
+              "query": [
+                {
+                  "key": "clientId",
+                  "value": "{{test_client_id}}"
+                },
+                {
+                  "key": "mail",
+                  "value": "{{test_merchant_email}}"
+                },
+                {
+                  "key": "merchantId",
+                  "value": "99999"
+                }
+              ]
+            },
+            "description": "Test d'erreur avec un ID de marchand inexistant"
+          },
+          "response": []
+        },
+        {
+          "name": "Create Deposit - Invalid Amount",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400 (Bad Request)', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "pm.test('Error message mentions amount validation', function () {",
+                  "    const responseText = pm.response.text();",
+                  "    pm.expect(responseText.toLowerCase()).to.include('montant');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": -100,\n  \"currency\": \"{{test_currency}}\",\n  \"customerEmail\": \"{{test_customer_email}}\",\n  \"customerPhone\": \"{{test_customer_phone}}\",\n  \"country\": \"{{test_country}}\",\n  \"gatewayName\": \"{{test_gateway_name}}\",\n  \"callbackUrl\": \"{{test_callback_url}}\",\n  \"returnUrl\": \"{{test_return_url}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/{{api_version}}/deposit/deposits",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{api_version}}",
+                "deposit",
+                "deposits"
+              ]
+            },
+            "description": "Test de création de dépôt avec montant invalide"
+          },
+          "response": []
+        },
+        {
+          "name": "Unauthorized Access",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 401 (Unauthorized)', function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/{{api_version}}/merchant/secret?clientId={{test_client_id}}&mail={{test_merchant_email}}&merchantId={{test_merchant_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "{{api_version}}",
+                "merchant",
+                "secret"
+              ],
+              "query": [
+                {
+                  "key": "clientId",
+                  "value": "{{test_client_id}}"
+                },
+                {
+                  "key": "mail",
+                  "value": "{{test_merchant_email}}"
+                },
+                {
+                  "key": "merchantId",
+                  "value": "{{test_merchant_id}}"
+                }
+              ]
+            },
+            "description": "Test d'accès non autorisé sans token"
+          },
+          "response": []
+        }
+      ],
+      "description": "Tests des scénarios d'erreur et de validation"
+    },
+    {
+      "name": "Health Check",
+      "item": [
+        {
+          "name": "API Health Check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "pm.test('API is healthy', function () {",
+                  "    const jsonData = pm.response.json();",
+                  "    pm.expect(jsonData.status).to.eql('UP');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/actuator/health",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "actuator",
+                "health"
+              ]
+            },
+            "description": "Vérifier l'état de santé de l'API"
+          },
+          "response": []
+        }
+      ],
+      "description": "Endpoints de vérification de l'état de santé de l'API"
+    },
+    {
+      "name": "Callback Controllers",
+      "item": [
+        {
+          "name": "PayDunya Callback - Completed",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Payment status updated', function () {",
+                  "    pm.expect(pm.response.text()).to.include('Payment status updated: completed');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"data\": {\n    \"status\": \"completed\",\n    \"custom_data\": {\n      \"trxId\": \"{{test_paydunya_trxid_encrypted}}\"\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/public/payments/paydunya-callback",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "public",
+                "payments",
+                "paydunya-callback"
+              ]
+            },
+            "description": "Test du callback PayDunya pour un paiement complété"
+          },
+          "response": []
+        },
+        {
+          "name": "PayDunya Callback - Failed",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Payment status updated', function () {",
+                  "    pm.expect(pm.response.text()).to.include('Payment status updated: failed');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"data\": {\n    \"status\": \"failed\",\n    \"custom_data\": {\n      \"trxId\": \"{{test_paydunya_trxid_encrypted}}\"\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/public/payments/paydunya-callback",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "public",
+                "payments",
+                "paydunya-callback"
+              ]
+            },
+            "description": "Test du callback PayDunya pour un paiement échoué"
+          },
+          "response": []
+        },
+        {
+          "name": "PayDunya Callback - Pending",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"data\": {\n    \"status\": \"pending\",\n    \"custom_data\": {\n      \"trxId\": \"{{test_paydunya_trxid_encrypted}}\"\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/public/payments/paydunya-callback",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "public",
+                "payments",
+                "paydunya-callback"
+              ]
+            },
+            "description": "Test du callback PayDunya pour un paiement en attente"
+          },
+          "response": []
+        },
+        {
+          "name": "PayDunya Callback - Status Inconnu",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "pm.test('Status manquant', function () {",
+                  "    pm.expect(pm.response.text()).to.include('status manquant');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"data\": {\n    \"status\": \"unknown\",\n    \"custom_data\": {\n      \"trxId\": \"{{test_paydunya_trxid_encrypted}}\"\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/public/payments/paydunya-callback",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "public",
+                "payments",
+                "paydunya-callback"
+              ]
+            },
+            "description": "Test du callback PayDunya pour un statut inconnu"
+          },
+          "response": []
+        },
+        {
+          "name": "PayDunya Callback - TrxId Mal Formé",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "pm.test('Invalid depositId encoding', function () {",
+                  "    pm.expect(pm.response.text()).to.include('Invalid depositId encoding');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"data\": {\n    \"status\": \"completed\",\n    \"custom_data\": {\n      \"trxId\": \"malformé\"\n    }\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/public/payments/paydunya-callback",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "public",
+                "payments",
+                "paydunya-callback"
+              ]
+            },
+            "description": "Test du callback PayDunya avec un trxId mal formé"
+          },
+          "response": []
+        },
+        {
+          "name": "MTN Callback - SUCCESSFUL",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Payment status updated', function () {",
+                  "    pm.expect(pm.response.text()).to.include('Payment status updated: SUCCESSFUL');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"externalId\": \"{{test_deposit_reference}}\",\n  \"status\": \"SUCCESSFUL\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/public/payments/mtn-callback",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "public",
+                "payments",
+                "mtn-callback"
+              ]
+            },
+            "description": "Test du callback MTN pour un paiement réussi"
+          },
+          "response": []
+        },
+        {
+          "name": "MTN Callback - FAILED",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test('Payment status updated', function () {",
+                  "    pm.expect(pm.response.text()).to.include('Payment status updated: FAILED');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"externalId\": \"{{test_deposit_reference}}\",\n  \"status\": \"FAILED\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/public/payments/mtn-callback",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "public",
+                "payments",
+                "mtn-callback"
+              ]
+            },
+            "description": "Test du callback MTN pour un paiement échoué"
+          },
+          "response": []
+        },
+        {
+          "name": "MTN Callback - PENDING",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"externalId\": \"{{test_deposit_reference}}\",\n  \"status\": \"PENDING\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/public/payments/mtn-callback",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "public",
+                "payments",
+                "mtn-callback"
+              ]
+            },
+            "description": "Test du callback MTN pour un paiement en attente"
+          },
+          "response": []
+        },
+        {
+          "name": "MTN Callback - Status Inconnu",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status code is 400', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "});",
+                  "pm.test('Status manquant', function () {",
+                  "    pm.expect(pm.response.text()).to.include('status manquant');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"externalId\": \"{{test_deposit_reference}}\",\n  \"status\": \"UNKNOWN\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/public/payments/mtn-callback",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "public",
+                "payments",
+                "mtn-callback"
+              ]
+            },
+            "description": "Test du callback MTN pour un statut inconnu"
+          },
+          "response": []
+        }
+      ],
+      "description": "Tests des controllers de callback PayDunya et MTN"
+    },
+    {
+      "name": "New Request",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": ""
+        }
+      },
+      "response": []
+    }
+  ],
+  "auth": {
+    "type": "oauth2",
+    "oauth2": [
+      {
+        "key": "tokenName",
+        "value": "AWDPay Token",
+        "type": "string"
+      },
+      {
+        "key": "clientSecret",
+        "value": "{{keycloak_client_secret}}",
+        "type": "string"
+      },
+      {
+        "key": "clientId",
+        "value": "{{keycloak_client_id}}",
+        "type": "string"
+      },
+      {
+        "key": "accessTokenUrl",
+        "value": "{{keycloak_base_url}}/realms/{{keycloak_realm}}/protocol/openid-connect/token",
+        "type": "string"
+      },
+      {
+        "key": "authUrl",
+        "value": "{{keycloak_base_url}}/realms/{{keycloak_realm}}/protocol/openid-connect/auth",
+        "type": "string"
+      },
+      {
+        "key": "grant_type",
+        "value": "client_credentials",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "requests": {},
+        "exec": [
+          "console.log('Préparation de la requête vers:', pm.request.url);"
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "requests": {},
+        "exec": [
+          "pm.test('Response time is less than 2000ms', function () {",
+          "    pm.expect(pm.response.responseTime).to.be.below(2000);",
+          "});",
+          "",
+          "pm.test('Content-Type header is present', function () {",
+          "    pm.response.to.have.header('Content-Type');",
+          "});"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "api_version",
+      "value": "api/v2"
+    },
+    {
+      "key": "keycloak_base_url",
+      "value": "http://localhost:6080"
+    },
+    {
+      "key": "keycloak_realm",
+      "value": "awdpay-marchand"
+    },
+    {
+      "key": "keycloak_client_id",
+      "value": "admin-cli"
+    },
+    {
+      "key": "keycloak_client_secret",
+      "value": "P1g8p7m9ZtkCs5htfYIJ86947EVoQJzR"
+    },
+    {
+      "key": "test_merchant_id",
+      "value": "1"
+    },
+    {
+      "key": "test_client_id",
+      "value": "merchant-test-client"
+    },
+    {
+      "key": "test_merchant_email",
+      "value": "merchant@test.com"
+    },
+    {
+      "key": "client_secret_response",
+      "value": ""
+    },
+    {
+      "key": "test_deposit_reference",
+      "value": ""
+    },
+    {
+      "key": "test_gateway_name",
+      "value": "mtn"
+    },
+    {
+      "key": "test_customer_phone",
+      "value": "+241066000000"
+    },
+    {
+      "key": "test_customer_email",
+      "value": "customer@test.com"
+    },
+    {
+      "key": "test_country",
+      "value": "GA"
+    },
+    {
+      "key": "test_currency",
+      "value": "XAF"
+    },
+    {
+      "key": "test_amount",
+      "value": "1000"
+    },
+    {
+      "key": "test_callback_url",
+      "value": "https://merchant.example.com/callback"
+    },
+    {
+      "key": "test_return_url",
+      "value": "https://merchant.example.com/return"
+    },
+    {
+      "key": "test_withdraw_reference",
+      "value": ""
+    },
+    {
+      "key": "test_withdraw_amount",
+      "value": "5000"
+    },
+    {
+      "key": "test_customer_name",
+      "value": ""
+    }
+  ]
+}

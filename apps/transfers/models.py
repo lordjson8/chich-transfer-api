@@ -14,6 +14,10 @@ from apps.core.models import TimeStampedModel, SoftDeleteModel
 
 class TransferStatus(models.TextChoices):
     PENDING = 'pending', 'Pending'
+    DEPOSIT_PENDING = 'deposit_pending', 'Deposit Pending'
+    DEPOSIT_CONFIRMED = 'deposit_confirmed', 'Deposit Confirmed'
+    DEPOSIT_FAILED = 'deposit_failed', 'Deposit Failed'
+    WITHDRAWAL_PENDING = 'withdrawal_pending', 'Withdrawal Pending'
     PROCESSING = 'processing', 'Processing'
     COMPLETED = 'completed', 'Completed'
     FAILED = 'failed', 'Failed'
@@ -23,6 +27,7 @@ class TransferStatus(models.TextChoices):
 
 class Currency(models.TextChoices):
     XAF = 'XAF', 'Central African Franc'
+    XOF = 'XOF', 'West African Franc'
     USD = 'USD', 'US Dollar'
     EUR = 'EUR', 'Euro'
     GBP = 'GBP', 'British Pound'
@@ -30,7 +35,10 @@ class Currency(models.TextChoices):
 
 
 class Transfer(TimeStampedModel, SoftDeleteModel):
-    """Single money transfer initiated by a user."""
+    """
+    Two-phase money transfer: deposit (collect from sender) then withdrawal (payout to receiver).
+    Uses AWDPay as the payment provider.
+    """
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
@@ -41,12 +49,42 @@ class Transfer(TimeStampedModel, SoftDeleteModel):
     )
 
     status = models.CharField(
-        max_length=20,
+        max_length=25,
         choices=TransferStatus.choices,
         default=TransferStatus.PENDING,
         db_index=True,
     )
 
+    # --- Sender info ---
+    sender_phone = models.CharField(max_length=20, blank=True, db_index=True)
+    sender_name = models.CharField(max_length=255, blank=True)
+    sender_email = models.EmailField(blank=True)
+
+    # --- Funding & payout providers ---
+    funding_mobile_provider = models.CharField(
+        max_length=50,
+        choices=MobileMoneyProvider.choices,
+        blank=True,
+        help_text="Sender's mobile money provider (e.g. mtn_cm).",
+    )
+    payout_mobile_provider = models.CharField(
+        max_length=50,
+        choices=MobileMoneyProvider.choices,
+        blank=True,
+        help_text="Receiver's mobile money provider (e.g. wave_ci).",
+    )
+
+    # --- Corridor ---
+    corridor = models.ForeignKey(
+        Corridor,
+        on_delete=models.PROTECT,
+        related_name='corridor_transfers',
+        null=True,
+        blank=True,
+        help_text="Source -> destination corridor used for this transfer.",
+    )
+
+    # --- Source amount (what the sender pays) ---
     amount = models.DecimalField(
         max_digits=15,
         decimal_places=2,
@@ -56,6 +94,21 @@ class Transfer(TimeStampedModel, SoftDeleteModel):
         max_length=3,
         choices=Currency.choices,
         default=Currency.XAF,
+    )
+
+    # --- Destination amount (what the receiver gets) ---
+    destination_amount = models.DecimalField(
+        max_digits=15,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Amount the receiver gets in destination currency.",
+    )
+    destination_currency = models.CharField(
+        max_length=3,
+        choices=Currency.choices,
+        blank=True,
+        help_text="Currency the receiver gets (e.g. XOF).",
     )
 
     service_fee = models.DecimalField(
@@ -69,11 +122,12 @@ class Transfer(TimeStampedModel, SoftDeleteModel):
         help_text="amount + service_fee",
     )
 
+    # --- Recipient info ---
     recipient_name = models.CharField(max_length=255)
     recipient_phone = models.CharField(max_length=20, db_index=True)
     recipient_email = models.EmailField(blank=True)
 
-    # External provider metadata
+    # --- External provider metadata ---
     provider = models.CharField(max_length=50, default='awdpay')
     reference = models.CharField(
         max_length=64,
@@ -87,6 +141,20 @@ class Transfer(TimeStampedModel, SoftDeleteModel):
         db_index=True,
         help_text="ID returned by provider (AwdPay).",
     )
+
+    # --- AWDPay Deposit (phase 1: collect from sender) ---
+    deposit_reference = models.CharField(max_length=128, blank=True, db_index=True)
+    deposit_status = models.CharField(max_length=50, blank=True)
+    deposit_gateway = models.CharField(max_length=50, blank=True)
+    deposit_initiated_at = models.DateTimeField(null=True, blank=True)
+    deposit_confirmed_at = models.DateTimeField(null=True, blank=True)
+
+    # --- AWDPay Withdrawal (phase 2: payout to receiver) ---
+    withdrawal_reference = models.CharField(max_length=128, blank=True, db_index=True)
+    withdrawal_status = models.CharField(max_length=50, blank=True)
+    withdrawal_gateway = models.CharField(max_length=50, blank=True)
+    withdrawal_initiated_at = models.DateTimeField(null=True, blank=True)
+    withdrawal_confirmed_at = models.DateTimeField(null=True, blank=True)
 
     description = models.TextField(blank=True)
 
@@ -104,6 +172,8 @@ class Transfer(TimeStampedModel, SoftDeleteModel):
             models.Index(fields=['status', '-created_at']),
             models.Index(fields=['reference']),
             models.Index(fields=['provider_id']),
+            models.Index(fields=['deposit_reference']),
+            models.Index(fields=['withdrawal_reference']),
         ]
 
     def save(self, *args, **kwargs):
@@ -111,10 +181,56 @@ class Transfer(TimeStampedModel, SoftDeleteModel):
             self.total_amount = (self.amount or 0) + (self.service_fee or 0)
         super().save(*args, **kwargs)
 
+    # --- State machine helpers ---
+
+    def mark_deposit_pending(self, deposit_ref: str, gateway: str):
+        self.status = TransferStatus.DEPOSIT_PENDING
+        self.deposit_reference = deposit_ref
+        self.deposit_gateway = gateway
+        self.deposit_status = 'pending'
+        self.deposit_initiated_at = timezone.now()
+        self.save(update_fields=[
+            'status', 'deposit_reference', 'deposit_gateway',
+            'deposit_status', 'deposit_initiated_at', 'updated_at',
+        ])
+
+    def mark_deposit_confirmed(self):
+        self.status = TransferStatus.DEPOSIT_CONFIRMED
+        self.deposit_status = 'completed'
+        self.deposit_confirmed_at = timezone.now()
+        self.save(update_fields=[
+            'status', 'deposit_status', 'deposit_confirmed_at', 'updated_at',
+        ])
+
+    def mark_deposit_failed(self, message: str = '', code: str = ''):
+        self.status = TransferStatus.DEPOSIT_FAILED
+        self.deposit_status = 'failed'
+        self.error_message = message
+        self.error_code = code
+        self.save(update_fields=[
+            'status', 'deposit_status', 'error_message', 'error_code', 'updated_at',
+        ])
+
+    def mark_withdrawal_pending(self, withdrawal_ref: str, gateway: str):
+        self.status = TransferStatus.WITHDRAWAL_PENDING
+        self.withdrawal_reference = withdrawal_ref
+        self.withdrawal_gateway = gateway
+        self.withdrawal_status = 'pending'
+        self.withdrawal_initiated_at = timezone.now()
+        self.save(update_fields=[
+            'status', 'withdrawal_reference', 'withdrawal_gateway',
+            'withdrawal_status', 'withdrawal_initiated_at', 'updated_at',
+        ])
+
     def mark_completed(self):
         self.status = TransferStatus.COMPLETED
+        self.withdrawal_status = 'completed'
+        self.withdrawal_confirmed_at = timezone.now()
         self.completed_at = timezone.now()
-        self.save(update_fields=['status', 'completed_at', 'updated_at'])
+        self.save(update_fields=[
+            'status', 'withdrawal_status', 'withdrawal_confirmed_at',
+            'completed_at', 'updated_at',
+        ])
 
     def mark_failed(self, message: str, code: str | None = None):
         self.status = TransferStatus.FAILED
@@ -154,7 +270,7 @@ class TransferLimitSnapshot(models.Model):
     corridor = models.ForeignKey(
         Corridor,
         on_delete=models.PROTECT,
-        related_name='transfers',
+        related_name='limit_snapshots',
         null=True,
         blank=True,
         help_text="Source → destination corridor used for this transfer.",
@@ -269,6 +385,12 @@ class TransferAuditLog(models.Model):
         choices=[
             ('created', 'Created'),
             ('provider_init', 'Provider Initiated'),
+            ('deposit_initiated', 'Deposit Initiated'),
+            ('deposit_confirmed', 'Deposit Confirmed'),
+            ('deposit_failed', 'Deposit Failed'),
+            ('withdrawal_initiated', 'Withdrawal Initiated'),
+            ('withdrawal_confirmed', 'Withdrawal Confirmed'),
+            ('withdrawal_failed', 'Withdrawal Failed'),
             ('completed', 'Completed'),
             ('failed', 'Failed'),
             ('webhook_received', 'Webhook Received'),

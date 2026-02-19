@@ -8,7 +8,7 @@ country ISO codes, and currencies.
 # Each entry: internal_code -> (awdpay_gateway_name, country_iso, currency)
 GATEWAY_MAP = {
     # Cameroon (XAF)
-    'mtn_cm':      ('mtn', 'CM', 'XAF'),
+    'mtn_cm':      ('mtn_cm', 'CM', 'XAF'),
     'orange_cm':   ('orange-cm', 'CM', 'XAF'),
 
     # Cote d'Ivoire (XOF)

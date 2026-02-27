@@ -9,5 +9,6 @@ gevent==24.2.1
 newrelic==9.5.0
 django-prometheus==2.3.1
 
+whitenoise
 # Performance
 # django-cachalot==2.6.1

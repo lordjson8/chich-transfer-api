@@ -15,7 +15,15 @@ DEBUG = False
 # Only accept requests for these hostnames.
 # Prevents HTTP Host header attacks. Set in .env.prod as comma-separated values.
 # Example: ALLOWED_HOSTS=api.yourdomain.com,yourdomain.com
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', cast=Csv())
+ALLOWED_HOSTS = ['awdpay.net']
+
+MIDDLEWARE += [
+    'debug_toolbar.middleware.DebugToolbarMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
+]
+
+# Add this near your Static Files settings
+STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
 # --- Security Settings ---
 # These headers protect against common web vulnerabilities.

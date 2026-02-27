@@ -1,0 +1,75 @@
+# ===========================================================================
+# GitHub Actions CI/CD Pipeline — .github/workflows/deploy.yml
+# ===========================================================================
+# This workflow runs automatically when code is pushed to the master branch.
+# It has two jobs:
+#   1. test  — Verify the code is valid (migrations, basic checks)
+#   2. deploy — SSH into the VPS and update the running application
+#
+# GitHub Actions is free for public repos and has 2000 min/month for private.
+# ===========================================================================
+
+# --- Trigger ---
+# "on: push" means this workflow runs when commits are pushed.
+# "branches: [master]" limits it to only the master branch.
+# Feature branches and PRs do NOT trigger deployment.
+name: Deploy to Production
+
+on:
+  push:
+    branches: [master]
+
+jobs:
+  # -------------------------------------------------------------------------
+  # JOB 1: TEST — Validate the code before deploying
+  # -------------------------------------------------------------------------
+  test:
+    runs-on: ubuntu-latest    # Use a fresh Ubuntu VM provided by GitHub
+
+    steps:
+      # Check out the repository code into the VM
+      - uses: actions/checkout@v4
+
+      # Install Python 3.12 (matching our Dockerfile)
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Install base dependencies (not production ones — we just need enough to check migrations)
+      - name: Install dependencies
+        run: |
+          pip install -r requirements/base.txt
+
+      # Verify there are no unapplied migration files.
+      # --check exits with error code 1 if migrations are pending.
+      # This catches cases where someone forgot to create migrations for model changes.
+      - name: Check migrations
+        run: |
+          python manage.py migrate --check --settings=config.settings.development
+        env:
+          DJANGO_SETTINGS_MODULE: config.settings.development
+
+  # -------------------------------------------------------------------------
+  # JOB 2: DEPLOY — Push changes to the VPS
+  # -------------------------------------------------------------------------
+  deploy:
+    needs: test               # Only run if the test job passed
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master'   # Extra safety: only deploy from master
+
+    steps:
+      # Use the appleboy/ssh-action to SSH into the VPS and run commands.
+      # The SSH credentials are stored as GitHub Secrets (never in code).
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SSH_HOST }}      # VPS IP address (e.g., 192.168.1.100)
+          username: ${{ secrets.SSH_USER }}   # SSH username (e.g., deploy)
+          key: ${{ secrets.SSH_KEY }}         # Private SSH key (ed25519)
+          script: |
+            cd /opt/chic-transfer-api                                          # Navigate to project directory on VPS
+            git pull origin master                                             # Pull latest code from GitHub
+            docker compose -f docker-compose.prod.yml build --no-cache web     # Rebuild the Django image with new code
+            docker compose -f docker-compose.prod.yml up -d --force-recreate web nginx  # Restart web + nginx (db stays running)
+            docker image prune -f                                              # Clean up old unused images to free disk space

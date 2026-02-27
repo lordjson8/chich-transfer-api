@@ -22,4 +22,4 @@ SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 # EMERGENCY LOG FIX: Use a path we KNOW exists inside the container
-LOGGING['handlers']['file']['filename'] = BASE_DIR / 'logs' / 'app.log'
+# LOGGING['handlers']['file']['filename'] = BASE_DIR / 'logs' / 'app.log'

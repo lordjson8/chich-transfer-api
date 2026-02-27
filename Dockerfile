@@ -53,6 +53,12 @@ ARG REQUIREMENTS_FILE=requirements/development.txt
 # --no-cache-dir → Don't store pip's download cache (smaller image)
 RUN pip install --no-cache-dir -r ${REQUIREMENTS_FILE}
 
+
+# Create the logging directory and file
+RUN mkdir -p /var/log/moneytransfer && \
+    touch /var/log/moneytransfer/app.log && \
+    chmod -R 777 /var/log/moneytransfer
+
 # NOW copy the entire project code into the image.
 # This step is intentionally AFTER pip install — if you only change code (not deps),
 # Docker reuses the cached pip install layer and only re-runs this COPY.

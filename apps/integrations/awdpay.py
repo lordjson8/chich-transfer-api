@@ -107,11 +107,12 @@ class AwdPayClient:
 
     def _request(self, method: str, url: str, **kwargs) -> dict:
         """Execute an HTTP request and return parsed JSON."""
+        print(f"AWDPay API request: {method} {url} with kwargs: {kwargs.get('json') or kwargs.get('params')}")
         kwargs.setdefault('headers', self._headers())
         kwargs.setdefault('timeout', 30)
 
         try:
-            resp = requests.request(method, url, **kwargs)
+            resp = requests.request(method, url,**kwargs)
         except requests.RequestException as exc:
             logger.error("AWDPay request error: %s %s -> %s", method, url, exc)
             raise AWDPayAPIError(f"Request failed: {exc}") from exc
@@ -159,15 +160,23 @@ class AwdPayClient:
         """
         callback_url = f"{self.callback_base_url}/webhooks/awdpay/deposit/"
         payload = {
-            'amount': amount,
-            'currency': currency,
-            'gateway': gateway,
-            'phone': phone,
-            'country': country,
-            'trxId': reference,
-            'description': description or f'Deposit {reference}',
-            'callbackUrl': callback_url,
+            "amount": 200,
+            "currency": currency,
+            "gatewayName": gateway,
+            "customerName": phone,  # AWDPay uses customerName but we only have phone, so we put phone here
+            "customerEmail": "aaa@aa.com",  # AWDPay requires customerEmail but we don't have it, so we put a dummy email
+            "customerPhone": phone,
+            "country": country,
+            # "trxId": reference,
+            "callbackUrl": callback_url,
+            "metadata": { 
+                "order_id": reference,
+                "description": description or f'Deposit {reference}',
+            }
         }
+
+    
+        print("AWDPay initiate_deposit payload:", payload)
         logger.info("AWDPay initiate_deposit: ref=%s gateway=%s amount=%s", reference, gateway, amount)
         return self._request('POST', self._api_url('classic/deposit/initiate'), json=payload)
 
@@ -203,14 +212,17 @@ class AwdPayClient:
         """
         callback_url = f"{self.callback_base_url}/webhooks/awdpay/withdrawal/"
         payload = {
-            'amount': amount,
-            'currency': currency,
-            'gateway': gateway,
-            'phone': phone,
-            'country': country,
-            'trxId': reference,
-            'description': description or f'Withdrawal {reference}',
-            'callbackUrl': callback_url,
+            "amount": amount,
+            "currency": currency,
+            "gatewayName": gateway,
+            "beneficiaryPhone": phone,
+            "country": country,
+            "trxId": reference,
+            "callbackUrl": callback_url,
+            "metadata": { 
+                "withdrawal_id": reference,
+                "description": description or f'Withdrawal {reference}',
+            }
         }
         logger.info("AWDPay initiate_withdrawal: ref=%s gateway=%s amount=%s", reference, gateway, amount)
         return self._request('POST', self._api_url('withdraw/initiate'), json=payload)

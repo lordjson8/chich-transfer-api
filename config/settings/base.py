@@ -366,6 +366,7 @@ AWDPAY_KEYCLOAK_REALM = config('AWDPAY_KEYCLOAK_REALM', default='awdpay-marchand
 AWDPAY_KEYCLOAK_CLIENT_ID = config('AWDPAY_KEYCLOAK_CLIENT_ID', default='')
 AWDPAY_KEYCLOAK_CLIENT_SECRET = config('AWDPAY_KEYCLOAK_CLIENT_SECRET', default='')
 AWDPAY_CALLBACK_BASE_URL = config('AWDPAY_CALLBACK_BASE_URL', default='http://localhost:8000')
+AWDPAY_WEBHOOK_SECRET = config('AWDPAY_WEBHOOK_SECRET', default='')
 
 # SMS Provider (example: Africa's Talking)
 SMS_PROVIDER = config('SMS_PROVIDER', default='africastalking')

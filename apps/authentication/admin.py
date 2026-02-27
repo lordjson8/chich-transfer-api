@@ -45,9 +45,6 @@ class UserAdmin(BaseUserAdmin):
         ('Security', {
             'fields': ('two_factor_enabled', 'pin_hash')
         }),
-        ('Limits', {
-            'fields': ('daily_limit', 'transaction_limit')
-        }),
         ('Permissions', {
             'fields': (
                 'is_active', 'is_staff', 'is_superuser',

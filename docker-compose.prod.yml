@@ -1,4 +1,4 @@
-version: '3.8'
+# version: '3.8'
 
 services:
   # -------------------------------------------------------------------------
@@ -20,7 +20,7 @@ services:
     expose:
       - "8000"  # Internal only, NPM will talk to this
     networks:
-      - awdpay_network
+      - app_app-network
     restart: unless-stopped
     depends_on:
       db:
@@ -48,7 +48,7 @@ services:
     ports:
       - "3308:3306"  # Changed to 3308 because 3307 is taken by awdpay_db
     networks:
-      - awdpay_network
+      - app_app-network
 
   # -------------------------------------------------------------------------
   # REDIS — Internal cache
@@ -60,7 +60,7 @@ services:
     volumes:
       - redis_data:/data
     networks:
-      - awdpay_network
+      - app_app-network
 
 volumes:
   mysql_data:
@@ -69,5 +69,5 @@ volumes:
   redis_data:
 
 networks:
-  awdpay_network:
+  app_app-network:
     external: true

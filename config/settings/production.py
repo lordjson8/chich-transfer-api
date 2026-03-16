@@ -12,6 +12,17 @@ MIDDLEWARE.insert(1, 'whitenoise.middleware.WhiteNoiseMiddleware')
 
 STATICFILES_STORAGE = 'whitenoise.storage.CompressedManifestStaticFilesStorage'
 
+
+
+USE_X_FORWARDED_HOST = True
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+
+# CSRF — autoriser le domaine frontend qui appelle l'admin
+CSRF_TRUSTED_ORIGINS = ['https://sandboxapi.awdpay.com']
+
+
+
 # --- Safety Headers ---
 SECURE_SSL_REDIRECT = True
 SESSION_COOKIE_SECURE = True

@@ -3,7 +3,7 @@ from .base import *
 DEBUG = False
 
 # Wildcard for all subdomains of awdpay.net
-ALLOWED_HOSTS = ['.awdpay.net', 'awdpay.net']
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='*.awdpay.com').split(',')
 
 # 1. REMOVED DebugToolbar (Never in production)
 # 2. WhiteNoise MUST be at the top of the list if possible, 

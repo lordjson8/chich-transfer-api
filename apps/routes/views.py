@@ -307,9 +307,12 @@ class AvailableDestinationsView(APIView):
             ).filter(
                 Q(type_category='payout') | Q(type_category='both')
             ).order_by('-priority')
+
+            
             
             destinations.append({
                 'country_code': dest.iso_code,
+                'phone_prefix': dest.phone_prefix,
                 'country_name': dest.name,
                 'country_flag': flag_map.get(dest.iso_code, '🌍'),
                 'corridor_id': corridor.id,
